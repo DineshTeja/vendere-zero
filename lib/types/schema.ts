@@ -122,6 +122,84 @@ export type Database = {
         }
         Relationships: []
       }
+      enhanced_ad_metrics: {
+        Row: {
+          ad_id: string
+          campaign_id: string | null
+          channel: string
+          clicks: number
+          conversion_rate: number
+          conversions: number
+          cost: number
+          cpc: number
+          cpm: number
+          created_at: string | null
+          ctr: number
+          date: string
+          demographics: Json | null
+          device_metrics: Json | null
+          engagement: Json | null
+          id: string
+          impressions: number
+          placement: Json | null
+          quality_score: number
+          roas: number
+          updated_at: string | null
+          viewability_rate: number
+          viewable_impressions: number
+        }
+        Insert: {
+          ad_id: string
+          campaign_id?: string | null
+          channel: string
+          clicks?: number
+          conversion_rate?: number
+          conversions?: number
+          cost?: number
+          cpc?: number
+          cpm?: number
+          created_at?: string | null
+          ctr?: number
+          date: string
+          demographics?: Json | null
+          device_metrics?: Json | null
+          engagement?: Json | null
+          id?: string
+          impressions?: number
+          placement?: Json | null
+          quality_score?: number
+          roas?: number
+          updated_at?: string | null
+          viewability_rate?: number
+          viewable_impressions?: number
+        }
+        Update: {
+          ad_id?: string
+          campaign_id?: string | null
+          channel?: string
+          clicks?: number
+          conversion_rate?: number
+          conversions?: number
+          cost?: number
+          cpc?: number
+          cpm?: number
+          created_at?: string | null
+          ctr?: number
+          date?: string
+          demographics?: Json | null
+          device_metrics?: Json | null
+          engagement?: Json | null
+          id?: string
+          impressions?: number
+          placement?: Json | null
+          quality_score?: number
+          roas?: number
+          updated_at?: string | null
+          viewability_rate?: number
+          viewable_impressions?: number
+        }
+        Relationships: []
+      }
       features: {
         Row: {
           ad_output_id: string
@@ -465,6 +543,42 @@ export type Database = {
           },
         ]
       }
+      tasks: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          meta: Json | null
+          result: Json | null
+          status: Database["public"]["Enums"]["task_status"]
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          meta?: Json | null
+          result?: Json | null
+          status?: Database["public"]["Enums"]["task_status"]
+          type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          meta?: Json | null
+          result?: Json | null
+          status?: Database["public"]["Enums"]["task_status"]
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       video_frames_mapping: {
         Row: {
           created_at: string | null
@@ -571,7 +685,35 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      enhanced_ad_metrics_by_campaign: {
+        Row: {
+          avg_conversion_rate: number | null
+          avg_ctr: number | null
+          avg_roas: number | null
+          campaign_id: string | null
+          cost_per_conversion: number | null
+          total_clicks: number | null
+          total_conversions: number | null
+          total_cost: number | null
+          total_impressions: number | null
+        }
+        Relationships: []
+      }
+      enhanced_ad_metrics_by_channel: {
+        Row: {
+          avg_conversion_rate: number | null
+          avg_cpc: number | null
+          avg_cpm: number | null
+          avg_ctr: number | null
+          channel: string | null
+          date: string | null
+          total_clicks: number | null
+          total_conversions: number | null
+          total_cost: number | null
+          total_impressions: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       fetch_library_items: {
@@ -664,6 +806,7 @@ export type Database = {
     }
     Enums: {
       library_item_type: "image" | "video"
+      task_status: "pending" | "processing" | "completed" | "failed"
     }
     CompositeTypes: {
       [_ in never]: never

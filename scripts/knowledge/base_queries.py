@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 import json
 import os
 import asyncio
-from typing import List, Dict, Any, Optional, Tuple, cast, Set
+from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 import requests
 import time
@@ -54,24 +54,6 @@ class QueryRequest(BaseModel):
     query: str
     deep_research: bool = False
     detail_level: int = Field(default=50, ge=0, le=100)
-
-
-class SuggestedTask(BaseModel):
-    """A suggested task for the user to complete based on their query"""
-
-    task_type: str = Field(
-        description="Type of task: 'variant_generation' or 'suggested_query'"
-    )
-    title: str = Field(description="Short descriptive title of the task")
-    description: str = Field(
-        description="Detailed description of what this task would accomplish"
-    )
-    input_data: Dict[str, Any] = Field(
-        description="Input data for the task in the format required by the relevant API"
-    )
-    relevance_score: float = Field(
-        description="How relevant this task is to the query (0-1)"
-    )
 
 
 class ReportSection(BaseModel):
@@ -1062,117 +1044,6 @@ class KnowledgeBase:
             },
         }
 
-    def _generate_suggested_tasks(
-        self, query: str, response_text: str, sources: List[Dict]
-    ) -> List[SuggestedTask]:
-        """Generate suggested tasks based on the query and response using LLM"""
-        try:
-            # Extract keywords to provide context for the LLM
-            keywords = self._extract_keywords_from_query(query)
-
-            # Prepare context from sources (limited to avoid token overflow)
-            source_context = []
-            for i, source in enumerate(sources[:5]):  # Limit to first 5 sources
-                source_type = source.get("extra_info", {}).get("type", "unknown")
-                source_context.append(
-                    f"Source {i + 1} ({source_type}): {source.get('text', '')[:200]}..."
-                )
-
-            source_context_str = "\n".join(source_context)
-
-            # Construct the prompt to generate task suggestions
-            suggested_tasks_prompt = f"""Based on the following user query, response, and source data, generate 3-5 suggested follow-up tasks.
-
-USER QUERY: "{query}"
-
-RESPONSE SUMMARY: {response_text[:500]}...
-
-SOURCES:
-{source_context_str}
-
-EXTRACTED KEYWORDS: {", ".join(keywords)}
-
-Please generate two types of tasks:
-1. "variant_generation" tasks - For creating ad variants based on the query context
-2. "suggested_query" tasks - For follow-up research queries to explore related topics
-
-Each task must strictly follow this JSON format:
-{{
-  "task_type": "variant_generation" or "suggested_query",
-  "title": "Brief descriptive title",
-  "description": "Detailed description of what this task would accomplish",
-  "input_data": {{
-    // For variant_generation tasks:
-    "keywords": [
-      {{ "term": "keyword1", "volume": 1000, "intent": "informational", "difficulty": 0.5 }},
-      // more keywords...
-    ],
-    "elements": [
-      {{ "type": "headline", "location": "top", "code": "<h1>{{{{text}}}}</h1>", "text": "Compelling headline text" }},
-      {{ "type": "body", "location": "middle", "code": "<p>{{{{text}}}}</p>", "text": "Informative body text" }},
-      {{ "type": "cta", "location": "bottom", "code": "<button>{{{{text}}}}</button>", "text": "Action-oriented CTA" }}
-    ],
-    "target_markets": ["Market1", "Market2", "Market3"]
-    
-    // For suggested_query tasks:
-    "query": "Follow-up query text",
-    "deep_research": true/false,
-    "detail_level": number between 50-85
-  }},
-  "relevance_score": number between 0.0-1.0
-}}
-
-Return a valid JSON array containing these tasks. Do not include any explanations or text outside the JSON array.
-"""
-
-            # Use the LLM to generate suggestions - choose an appropriate LLM model
-            # For complex structured output, OpenAI might be more reliable than Perplexity
-            if hasattr(self, "llm") and self.llm:
-                llm_for_tasks = self.llm  # Use existing OpenAI LLM if available
-            else:
-                # Create a new OpenAI instance with appropriate settings for structured output
-                llm_for_tasks = OpenAI(model="gpt-4o-mini", temperature=0.2)
-
-            # Get the LLM response
-            response = llm_for_tasks.complete(suggested_tasks_prompt)
-            response_text = response.text
-
-            # Extract the JSON array from the response
-            # Find anything that looks like a JSON array
-            json_match = re.search(r"\[\s*\{.*\}\s*\]", response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-            else:
-                # Fallback: assume the entire response is JSON
-                json_str = response_text
-
-            # Parse the JSON into Python objects
-            try:
-                task_dicts = json.loads(json_str)
-
-                # Convert dictionaries to SuggestedTask objects
-                suggested_tasks = []
-                for task_dict in task_dicts:
-                    # Validate the task has all required fields
-                    required_fields = [
-                        "task_type",
-                        "title",
-                        "description",
-                        "input_data",
-                        "relevance_score",
-                    ]
-                    if all(field in task_dict for field in required_fields):
-                        suggested_tasks.append(SuggestedTask(**task_dict))
-
-                return suggested_tasks
-            except json.JSONDecodeError:
-                print(f"Error parsing LLM response as JSON: {response_text[:100]}...")
-                # Fall back to empty list if JSON parsing fails
-                return []
-        except Exception as e:
-            print(f"Error generating suggested tasks: {str(e)}")
-            return []
-
     async def query(
         self, query: str, deep_research: bool = False, detail_level: int = 50
     ) -> dict:
@@ -1182,16 +1053,10 @@ Return a valid JSON array containing these tasks. Do not include any explanation
             print(f"Processing query with detail level {detail_level}: {query}")
             result = self._fast_query_engine(query, detail_level)
 
-            # Generate suggested tasks based on the query and response
-            suggested_tasks = self._generate_suggested_tasks(
-                query=query, response_text=result["response"], sources=result["sources"]
-            )
-
             return {
                 "response": result["response"],
                 "sources": result["sources"],
                 "citations": result["citations"],
-                "suggested_tasks": [task.dict() for task in suggested_tasks],
                 "metadata": {
                     "detail_level": detail_level,
                     "retrieval_time": result["timing"]["retrieval_time"],

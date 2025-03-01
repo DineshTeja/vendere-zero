@@ -1,21 +1,21 @@
 from pydantic import BaseModel, UUID4, Field
 from datetime import date
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 
 class GoogleAd(BaseModel):
     advertisement_url: str
-    advertiser_name: str | None
-    advertiser_url: str | None
-    image_url: str | None
-    last_shown: date | None = None
+    advertiser_name: Optional[str] = None
+    advertiser_url: Optional[str] = None
+    image_url: Optional[str] = None
+    last_shown: Optional[date] = None
 
 
 class AdStructuredOutput(BaseModel):
     id: UUID4 = Field(default_factory=UUID4)
     image_url: str
     image_description: str
-    description_embeddings: list[float] | None = None
+    description_embeddings: Optional[List[float]] = None
 
 
 class SentimentAnalysis(BaseModel):
@@ -51,21 +51,21 @@ class Feature(BaseModel):
         "bottom-right",
         "unknown",
     ]
-    visual_attributes: List[VisualAttribute] | None = None
+    visual_attributes: Optional[List[VisualAttribute]] = None
 
 
 class AdAnalysis(BaseModel):
     id: UUID4 = Field(default_factory=UUID4)
     image_description: str
-    features: List[Feature] | None = None
-    sentiment: SentimentAnalysis | None = None
+    features: Optional[List[Feature]] = None
+    sentiment: Optional[SentimentAnalysis] = None
 
 
 class AdMetric(BaseModel):
     ad_id: UUID4
     impressions: int = Field(0, ge=0)  # Non-negative integer
     clicks: int = Field(0, ge=0)  # Non-negative integer
-    ctr: float | None = None
+    ctr: Optional[float] = None
 
 
 class JoinedFeatureMetric(BaseModel):
