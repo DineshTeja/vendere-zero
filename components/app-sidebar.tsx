@@ -12,8 +12,9 @@ import {
   KeyboardIcon,
   // SquareTerminal,
   // AudioLines,
-  ListIcon,
   PlusCircleIcon,
+  Settings,
+  ImageIcon,
 } from "lucide-react";
 import { LayoutGroup } from "framer-motion";
 
@@ -75,10 +76,20 @@ const getNavData = () => ({
       url: "/keywords/list",
       icon: KeyboardIcon,
     },
+    // {
+    //   title: "Ad variants",
+    //   url: "/ad-variants",
+    //   icon: PlusCircleIcon,
+    // },
     {
-      title: "Ad variants",
-      url: "/ad-variants",
-      icon: PlusCircleIcon,
+      title: "Brand Materials",
+      url: "/material",
+      icon: ImageIcon,
+    },
+    {
+      title: "Automations",
+      url: "/automations",
+      icon: Settings,
     },
     // {
     //   title: "Simulations",

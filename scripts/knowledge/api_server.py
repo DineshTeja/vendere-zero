@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing services...")
     # kb = KnowledgeBase()
     # market_analyzer = MarketResearchAnalyzer()
-    # variant_generator = VariantGenerator()
+    variant_generator = VariantGenerator()
     keyword_generator = KeywordVariantGenerator()
     logger.info("Services initialized successfully")
 
