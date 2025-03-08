@@ -37,6 +37,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Type for the RPC function result
 type AdVariantItem = {
@@ -118,6 +124,18 @@ const RULE_TYPES = [
 ] as const;
 
 type RuleType = (typeof RULE_TYPES)[number];
+
+// Utility function to format URLs in a condensed way
+const formatUrl = (url: string): string => {
+  try {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname.replace("www.", "");
+    const path = urlObj.pathname === "/" ? "" : urlObj.pathname;
+    return `${domain}${path}`.slice(0, 30) + (url.length > 30 ? "..." : "");
+  } catch {
+    return url.slice(0, 30) + (url.length > 30 ? "..." : "");
+  }
+};
 
 // Component to handle ad image display with ad blocker consideration
 const AdImage = ({
@@ -291,6 +309,33 @@ export default function Automations() {
   // Add Delete Rule Dialog State
   const [ruleToDelete, setRuleToDelete] = useState<CustomRule | null>(null);
 
+  // Add Rule Selection Dialog State
+  const [isRuleSelectionOpen, setIsRuleSelectionOpen] = useState(false);
+  const [selectedRules, setSelectedRules] = useState<{
+    [key: string]: boolean;
+  }>({});
+
+  // Initialize selected rules when dialog opens
+  useEffect(() => {
+    if (isRuleSelectionOpen) {
+      const initialSelection: { [key: string]: boolean } = {};
+
+      // Select all custom rules by default
+      customRules.forEach((rule) => {
+        initialSelection[`custom-${rule.id}`] = true;
+      });
+
+      // Select all brand material rules by default
+      brandMaterials.forEach((material) => {
+        material.content_rules.forEach((rule, index) => {
+          initialSelection[`material-${material.id}-${index}`] = true;
+        });
+      });
+
+      setSelectedRules(initialSelection);
+    }
+  }, [isRuleSelectionOpen, customRules, brandMaterials]);
+
   // Get the selected ad
   const selectedAd =
     selectedAdIndex !== null ? adVariants[selectedAdIndex] : null;
@@ -359,10 +404,10 @@ export default function Automations() {
 
   // Fetch rules when tab changes to rules
   useEffect(() => {
-    if (activeTab === "rules") {
+    if (activeTab === "rules" || isRuleSelectionOpen) {
       fetchRules();
     }
-  }, [activeTab]);
+  }, [activeTab, isRuleSelectionOpen]);
 
   // Set up real-time subscriptions for custom rules
   useEffect(() => {
@@ -765,31 +810,9 @@ export default function Automations() {
                     className="px-6 py-4 bg-card shrink-0 box-border"
                     style={{ height: "73px" }}
                   >
-                    {selectedAd ? (
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {/* Small preview image */}
-                          <AdImage
-                            src={selectedAd.mr_image_url}
-                            alt={selectedAd.li_name || "Ad preview"}
-                            size={48}
-                            className="shrink-0"
-                          />
-                          <div className="overflow-hidden">
-                            <CardTitle className="text-xl truncate">
-                              {selectedAd.li_name}
-                            </CardTitle>
-                            {selectedAd.li_description && (
-                              <p className="text-xs text-muted-foreground line-clamp-2 leading-tight mt-0.5">
-                                {selectedAd.li_description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <CardTitle className="text-xl">Automations</CardTitle>
-                    )}
+                    <CardTitle className="text-xl">
+                      {selectedAd ? "Ad Details" : "Automations"}
+                    </CardTitle>
                   </div>
 
                   <Separator className="shrink-0" />
@@ -803,10 +826,68 @@ export default function Automations() {
                   >
                     <ScrollArea className="h-full">
                       {selectedAd ? (
-                        <div>
-                          {/* Automation details will go here */}
-                          <div className="text-sm text-muted-foreground">
-                            Automation details coming soon...
+                        <div className="space-y-8">
+                          {/* Ad Preview Section */}
+                          <div className="space-y-6">
+                            <div className="flex items-start gap-6">
+                              <AdImage
+                                src={selectedAd.mr_image_url}
+                                alt={selectedAd.li_name || "Ad preview"}
+                                size={200}
+                                className="shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <h2 className="text-xl font-semibold truncate mb-2">
+                                  {selectedAd.li_name}
+                                </h2>
+                                {selectedAd.li_description && (
+                                  <p className="text-sm text-muted-foreground">
+                                    {selectedAd.li_description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Automation Actions */}
+                          <div className="space-y-4">
+                            <h3 className="text-sm font-medium">
+                              Available Automations
+                            </h3>
+                            <Card className="p-6">
+                              <div className="flex flex-col items-center justify-center text-center">
+                                <Settings className="h-12 w-12 text-muted-foreground/60 mb-4" />
+                                <h3 className="text-lg font-medium mb-2">
+                                  Create New Automation
+                                </h3>
+                                <p className="text-muted-foreground text-sm max-w-lg mb-4">
+                                  Choose an automation type to generate
+                                  optimized content for your ad.
+                                </p>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button className="gap-2">
+                                      <Plus className="h-4 w-4" />
+                                      Create Automation
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent
+                                    align="start"
+                                    className="w-64"
+                                  >
+                                    <DropdownMenuItem
+                                      className="flex items-center"
+                                      onSelect={() =>
+                                        setIsRuleSelectionOpen(true)
+                                      }
+                                    >
+                                      <Settings className="h-4 w-4 mr-2" />
+                                      Generate Headline Variants
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </Card>
                           </div>
                         </div>
                       ) : (
@@ -1235,7 +1316,7 @@ export default function Automations() {
           <DialogHeader>
             <DialogTitle>Edit Rule</DialogTitle>
             <DialogDescription>
-              Modify the existing rule's settings and values.
+              Modify the existing rule&apos;s settings and values.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -1391,6 +1472,222 @@ export default function Automations() {
               ) : (
                 "Delete Rule"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Rule Selection Dialog */}
+      <Dialog open={isRuleSelectionOpen} onOpenChange={setIsRuleSelectionOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Select Rules to Apply</DialogTitle>
+            <DialogDescription>
+              Choose which rules to consider when generating headline variants.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="flex-1 pr-4">
+            <div className="space-y-6 py-4">
+              {isLoadingRules ? (
+                <div className="flex justify-center items-center py-8">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
+                    <span className="text-sm text-muted-foreground">
+                      Loading rules...
+                    </span>
+                  </div>
+                </div>
+              ) : rulesError ? (
+                <div className="bg-destructive/10 p-4 rounded-lg text-destructive text-sm">
+                  <div className="font-medium mb-1">Error loading rules</div>
+                  <p className="text-destructive/80 text-xs mb-3">
+                    {rulesError}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={fetchRules}
+                    className="w-full"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : customRules.length === 0 && brandMaterials.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-muted-foreground">
+                    No rules available. Create some rules first.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Custom Rules Section */}
+                  {customRules.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium">Custom Rules</h4>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            const newSelection = { ...selectedRules };
+                            const areAllSelected = customRules.every(
+                              (rule) => selectedRules[`custom-${rule.id}`]
+                            );
+                            customRules.forEach((rule) => {
+                              newSelection[`custom-${rule.id}`] =
+                                !areAllSelected;
+                            });
+                            setSelectedRules(newSelection);
+                          }}
+                        >
+                          {customRules.every(
+                            (rule) => selectedRules[`custom-${rule.id}`]
+                          )
+                            ? "Deselect All"
+                            : "Select All"}
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {customRules.map((rule) => (
+                          <Card key={rule.id} className="p-2">
+                            <div className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                id={`custom-${rule.id}`}
+                                checked={
+                                  selectedRules[`custom-${rule.id}`] ?? true
+                                }
+                                onChange={(e) =>
+                                  setSelectedRules((prev) => ({
+                                    ...prev,
+                                    [`custom-${rule.id}`]: e.target.checked,
+                                  }))
+                                }
+                                className="mt-1"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <label
+                                  htmlFor={`custom-${rule.id}`}
+                                  className="text-xs font-medium block truncate cursor-pointer"
+                                >
+                                  {rule.name}
+                                </label>
+                                <span className="text-[10px] text-muted-foreground block truncate">
+                                  {rule.description}
+                                </span>
+                                <span className="text-[10px] text-primary mt-0.5 inline-block px-1.5 py-0.5 rounded-full bg-primary/10">
+                                  {rule.type}
+                                </span>
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Brand Material Rules Section */}
+                  {brandMaterials.map((material) => (
+                    <div key={material.id} className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-medium truncate">
+                            Rules from {formatUrl(material.material_url)}
+                          </h4>
+                          <span className="text-xs text-muted-foreground">
+                            ({material.content_rules.length})
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            const newSelection = { ...selectedRules };
+                            const areAllSelected = material.content_rules.every(
+                              (_, index) =>
+                                selectedRules[
+                                  `material-${material.id}-${index}`
+                                ]
+                            );
+                            material.content_rules.forEach((_, index) => {
+                              newSelection[`material-${material.id}-${index}`] =
+                                !areAllSelected;
+                            });
+                            setSelectedRules(newSelection);
+                          }}
+                        >
+                          {material.content_rules.every(
+                            (_, index) =>
+                              selectedRules[
+                                `material-${material.id}-${index}`
+                              ] ?? true
+                          )
+                            ? "Deselect All"
+                            : "Select All"}
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {material.content_rules.map((rule, index) => (
+                          <Card key={index} className="p-2">
+                            <div className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                id={`material-${material.id}-${index}`}
+                                checked={
+                                  selectedRules[
+                                    `material-${material.id}-${index}`
+                                  ] ?? true
+                                }
+                                onChange={(e) =>
+                                  setSelectedRules((prev) => ({
+                                    ...prev,
+                                    [`material-${material.id}-${index}`]:
+                                      e.target.checked,
+                                  }))
+                                }
+                                className="mt-1"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <label
+                                  htmlFor={`material-${material.id}-${index}`}
+                                  className="text-xs font-medium block truncate cursor-pointer"
+                                >
+                                  {rule.name}
+                                </label>
+                                <span className="text-[10px] text-muted-foreground block truncate">
+                                  {rule.description}
+                                </span>
+                                <span className="text-[10px] text-primary mt-0.5 inline-block px-1.5 py-0.5 rounded-full bg-primary/10">
+                                  {rule.type}
+                                </span>
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </ScrollArea>
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsRuleSelectionOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                // TODO: Handle variant generation with selected rules
+                setIsRuleSelectionOpen(false);
+                toast.success("Starting variant generation...");
+              }}
+            >
+              Generate Variants
             </Button>
           </DialogFooter>
         </DialogContent>
