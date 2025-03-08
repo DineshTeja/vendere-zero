@@ -10,9 +10,6 @@ import {
   LibraryBigIcon,
   BarChart3Icon,
   KeyboardIcon,
-  // SquareTerminal,
-  // AudioLines,
-  PlusCircleIcon,
   Settings,
   ImageIcon,
 } from "lucide-react";
