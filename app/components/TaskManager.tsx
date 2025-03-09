@@ -1,191 +1,394 @@
-import React from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import React, { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { X, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import {
+  X,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Tag,
+  Loader2,
+  List,
+} from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { motion } from "framer-motion";
+import Image from "next/image";
+import { supabase } from "@/lib/supabase";
 
 // Task status type
 export type TaskStatus = "pending" | "processing" | "completed" | "failed";
 
+// Add type definitions for task metadata and result
+interface TaskMetadata {
+  mr_image_url?: string;
+  li_name?: string;
+  adName?: string;
+  imageUrl?: string;
+}
+
+interface TaskResult {
+  variants_generated?: number;
+  total_processed?: number;
+}
+
 // Task type
 export interface Task {
   id: string;
+  user_id: string;
+  type: string;
   status: TaskStatus;
-  progress: number;
-  totalItems: number;
-  completedItems: number;
-  createdAt: string;
-  updatedAt: string;
-  result?: {
-    variants_generated?: number;
-    successful?: number;
-    failed?: number;
-    keywords?: Array<{
-      keyword: string;
-      status: string;
-      variants_count?: number;
-      error?: string;
-    }>;
-  };
+  created_at: string;
+  updated_at: string;
+  meta: TaskMetadata;
+  result?: TaskResult;
   error?: string;
-  message?: string;
 }
 
 interface TaskManagerProps {
   tasks: Task[];
   onRemoveTask: (taskId: string) => void;
-  onRefreshList?: () => void;
+  isOpen: boolean;
+  onClose: () => void;
+  onTasksUpdate: (tasks: Task[]) => void;
 }
+
+// Component to handle ad image display with ad blocker consideration
+const AdImage = ({
+  src,
+  className = "",
+  size,
+  alt = "Ad image",
+}: {
+  src?: string;
+  className?: string;
+  size?: number;
+  alt?: string;
+}) => {
+  const [hasError, setHasError] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [wasBlocked, setWasBlocked] = React.useState(false);
+
+  // Check if a URL is likely to be blocked by ad blockers
+  const isLikelyToBeBlocked = (url: string): boolean => {
+    return (
+      url.includes("googlesyndication") ||
+      url.includes("googleads") ||
+      url.includes("doubleclick") ||
+      url.includes("ad.") ||
+      url.includes(".ad") ||
+      url.includes("ads.") ||
+      url.includes(".ads")
+    );
+  };
+
+  // Process image URL - use proxy for potentially blocked URLs
+  const getImageUrl = (originalUrl?: string): string | undefined => {
+    if (!originalUrl) return undefined;
+
+    // If it's a data URL, return as is
+    if (originalUrl.startsWith("data:")) return originalUrl;
+
+    // If URL is likely to be blocked, use our proxy
+    if (isLikelyToBeBlocked(originalUrl)) {
+      return `/api/proxy-image?url=${encodeURIComponent(originalUrl)}`;
+    }
+
+    // Otherwise return the original URL
+    return originalUrl;
+  };
+
+  // Computed image URL with proxy if needed
+  const imageUrl = React.useMemo(() => getImageUrl(src), [src]);
+
+  // Reset error state if src changes
+  React.useEffect(() => {
+    setHasError(false);
+    setIsLoading(true);
+    setWasBlocked(false);
+  }, [src]);
+
+  // Function to detect errors
+  const handleImageError = () => {
+    setHasError(true);
+    setIsLoading(false);
+
+    // If the URL seems like it would be blocked, mark it
+    if (src && isLikelyToBeBlocked(src)) {
+      setWasBlocked(true);
+    }
+  };
+
+  // If no source or error, show fallback
+  if (!imageUrl || hasError) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-muted/40 text-muted-foreground text-xs text-center p-1 rounded-md border ${className}`}
+        style={
+          size
+            ? { width: size, height: size }
+            : { aspectRatio: "1/1", width: "100%" }
+        }
+      >
+        {wasBlocked ? (
+          <div className="flex flex-col items-center">
+            <span>Ad</span>
+            <span className="text-[9px] mt-1">(Blocked)</span>
+          </div>
+        ) : (
+          <div className="h-5 w-5 opacity-40" />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`relative border rounded-md overflow-hidden bg-background ${className}`}
+      style={
+        size
+          ? { width: size, height: size }
+          : { aspectRatio: "1/1", width: "100%" }
+      }
+    >
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted/30 z-10">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+      <Image
+        src={imageUrl}
+        alt={alt}
+        fill
+        className="object-cover"
+        onError={handleImageError}
+        onLoadingComplete={() => setIsLoading(false)}
+        unoptimized
+      />
+    </div>
+  );
+};
 
 const TaskManager: React.FC<TaskManagerProps> = ({
   tasks,
   onRemoveTask,
-  onRefreshList,
+  isOpen,
+  onClose,
+  onTasksUpdate,
 }) => {
-  // Return early if no tasks
-  if (!tasks || tasks.length === 0) {
-    return null;
-  }
+  useEffect(() => {
+    // Subscribe to task updates
+    const channel = supabase
+      .channel("tasks")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "tasks",
+        },
+        async (payload) => {
+          console.log("Received task update:", payload);
+          // Fetch all tasks again when there's any change
+          const { data: updatedTasks, error } = await supabase
+            .from("tasks")
+            .select("*")
+            .order("created_at", { ascending: false });
 
-  // Status badge
-  const StatusBadge = ({ status }: { status: TaskStatus }) => {
-    switch (status) {
-      case "pending":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-amber-100 dark:bg-amber-900 dark:text-amber-100 text-amber-900"
-          >
-            <Clock className="w-3 h-3 mr-1" />
-            Pending
-          </Badge>
-        );
-      case "processing":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-blue-100 dark:bg-blue-900 dark:text-blue-100 text-blue-900"
-          >
-            <span className="w-3 h-3 mr-1 rounded-full bg-blue-500 animate-pulse"></span>
-            Processing
-          </Badge>
-        );
-      case "completed":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-green-100 dark:bg-green-900 dark:text-green-100 text-green-900"
-          >
-            <CheckCircle className="w-3 h-3 mr-1" />
-            Completed
-          </Badge>
-        );
-      case "failed":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-red-100 dark:bg-red-900 dark:text-red-100 text-red-900"
-          >
-            <AlertCircle className="w-3 h-3 mr-1" />
-            Failed
-          </Badge>
-        );
-      default:
-        return null;
-    }
-  };
+          if (error) {
+            console.error("Error fetching updated tasks:", error);
+            return;
+          }
 
-  // Format time since task creation
-  const formatTimeSince = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+          if (updatedTasks) {
+            console.log("Updating tasks:", updatedTasks);
+            onTasksUpdate(updatedTasks);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log("Subscription status:", status);
+      });
 
-    if (seconds < 60) return `${seconds} seconds ago`;
+    // Cleanup subscription on unmount
+    return () => {
+      console.log("Cleaning up subscription");
+      supabase.removeChannel(channel);
+    };
+  }, [onTasksUpdate]);
 
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
+  // Group tasks by status
+  const completedTasks = tasks.filter(
+    (task) => task.status === "completed" || task.status === "failed"
+  );
+  const activeTasks = tasks.filter(
+    (task) => task.status === "pending" || task.status === "processing"
+  );
 
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
-
-    const days = Math.floor(hours / 24);
-    return `${days} day${days !== 1 ? "s" : ""} ago`;
-  };
+  if (!isOpen) return null;
 
   return (
-    <Card className="mb-6">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg">Active Tasks</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          {tasks.map((task) => (
-            <div key={task.id} className="border rounded-md p-4 relative">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute top-2 right-2 h-6 w-6 p-0"
-                onClick={() => onRemoveTask(task.id)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-
-              <div className="flex items-center justify-between mb-3">
-                <StatusBadge status={task.status} />
-                <span className="text-sm text-muted-foreground">
-                  {formatTimeSince(task.createdAt)}
-                </span>
-              </div>
-
-              <div className="mb-2">
-                <div className="flex justify-between mb-1">
-                  <span className="text-sm font-medium">
-                    {task.status === "completed"
-                      ? `Completed: ${task.completedItems}/${task.totalItems}`
-                      : `Processing ${task.totalItems} items`}
-                  </span>
-                  <span className="text-sm font-medium">{task.progress}%</span>
-                </div>
-                <Progress value={task.progress} className="h-2" />
-              </div>
-
-              {task.error && (
-                <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm rounded">
-                  Error: {task.error}
-                </div>
-              )}
-
-              {task.result && (
-                <div className="mt-2 text-sm">
-                  <p>
-                    Generated {task.result.variants_generated ?? 0} variants for{" "}
-                    {task.result.successful ?? 0} keywords.
-                  </p>
-                  {(task.result.failed ?? 0) > 0 && (
-                    <p className="text-amber-700 dark:text-amber-400">
-                      {task.result.failed} keywords failed.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {task.status === "completed" && onRefreshList && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={onRefreshList}
-                >
-                  Refresh List
-                </Button>
-              )}
-            </div>
-          ))}
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      className="fixed bottom-6 right-6 bg-card border shadow-lg rounded-lg w-[420px] z-50"
+    >
+      <div className="p-3 border-b flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h3 className="font-medium text-sm">Tasks</h3>
+          {activeTasks.length > 0 && (
+            <Badge variant="secondary" className="px-1.5 py-0 h-5">
+              {activeTasks.length} Active
+            </Badge>
+          )}
         </div>
-      </CardContent>
-    </Card>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 hover:bg-muted/50"
+          onClick={onClose}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <ScrollArea className="max-h-[400px]">
+        {tasks.length === 0 ? (
+          <div className="py-12 text-center text-muted-foreground">
+            <div className="flex justify-center mb-3">
+              <List className="h-8 w-8 text-muted-foreground/50" />
+            </div>
+            <p className="text-sm mb-1">No tasks running</p>
+            <p className="text-xs text-muted-foreground/70">
+              Tasks will appear here when you generate variants
+            </p>
+          </div>
+        ) : (
+          <div className="p-3 space-y-6">
+            {/* Active Tasks */}
+            {activeTasks.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-xs font-medium text-muted-foreground px-1">
+                  Active Tasks
+                </h4>
+                <div className="space-y-3">
+                  {activeTasks.map((task) => (
+                    <TaskItem
+                      key={task.id}
+                      task={task}
+                      onRemove={onRemoveTask}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Completed Tasks */}
+            {completedTasks.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-xs font-medium text-muted-foreground px-1">
+                  Completed Tasks
+                </h4>
+                <div className="space-y-3">
+                  {completedTasks.map((task) => (
+                    <TaskItem
+                      key={task.id}
+                      task={task}
+                      onRemove={onRemoveTask}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </ScrollArea>
+    </motion.div>
+  );
+};
+
+// TaskItem component to handle individual task rendering
+const TaskItem: React.FC<{ task: Task; onRemove: (id: string) => void }> = ({
+  task,
+  onRemove,
+}) => {
+  const adVariant = task.type === "keyword_generation" ? task.meta : null;
+  const imageUrl = adVariant?.mr_image_url || adVariant?.imageUrl;
+  const adName = adVariant?.li_name || adVariant?.adName || "Ad preview";
+
+  return (
+    <div className="border rounded-md p-3 bg-muted/30 relative group">
+      <div className="flex gap-3">
+        {/* Ad Image Preview */}
+        <div className="shrink-0">
+          <AdImage
+            src={imageUrl}
+            size={48}
+            className="rounded-md"
+            alt={adName}
+          />
+        </div>
+
+        <div className="flex-1 min-w-0 pr-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate mb-1">{adName}</p>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {task.status === "pending" && (
+                  <>
+                    <Clock className="h-3 w-3" />
+                    <span>Queued</span>
+                  </>
+                )}
+                {task.status === "processing" && (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                    <span className="text-primary">Processing</span>
+                  </>
+                )}
+                {task.status === "completed" && (
+                  <>
+                    <CheckCircle className="h-3 w-3 text-green-500" />
+                    <span className="text-green-500">Completed</span>
+                  </>
+                )}
+                {task.status === "failed" && (
+                  <>
+                    <XCircle className="h-3 w-3 text-destructive" />
+                    <span className="text-destructive">Failed</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-2 space-y-1">
+            {task.status === "completed" && task.result?.variants_generated && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Tag className="h-3 w-3" />
+                Generated {task.result.variants_generated} variants
+              </p>
+            )}
+
+            {task.status === "failed" && task.error && (
+              <p className="text-xs text-destructive flex items-center gap-1.5">
+                <XCircle className="h-3 w-3" />
+                {task.error}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 w-6 p-0 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
+        onClick={() => onRemove(task.id)}
+      >
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    </div>
   );
 };
 
