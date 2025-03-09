@@ -14,4 +14,7 @@ tenacity
 requests
 playwright
 pillow
-opencv-python 
+opencv-python
+asyncio
+scikit-learn
+typing-extensions 

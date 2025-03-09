@@ -1,6 +1,7 @@
 from collections import defaultdict
 import os
 from typing import Any, Generator
+from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import UUID4
 from selenium import webdriver
@@ -8,7 +9,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
-
+from typing import List
 import supabase
 from tqdm import tqdm
 
@@ -24,8 +25,11 @@ from models import (
 )
 
 
-load_dotenv(".env.local")
+root_dir = Path(__file__).resolve().parents[2]
+env_path = root_dir / '.env.local'
 
+# Load the environment variables
+load_dotenv(env_path)
 
 def create_driver(headless: bool = True) -> WebDriver:
     chrome_options = Options()
@@ -44,12 +48,12 @@ def get_supabase_client():
     )
 
 
-def get_ad_data_from_db() -> list[GoogleAd]:
+def get_ad_data_from_db() -> List[GoogleAd]:
     supabase_client = get_supabase_client()
     offset, batch_size = 0, 1000
-    ads: list[GoogleAd] = []
+    ads: List[GoogleAd] = []
     while True:
-        new_ads: list[GoogleAd] = [
+        new_ads: List[GoogleAd] = [
             GoogleAd.model_validate(ad)
             for ad in supabase_client.table("google_image_ads")
             .select("*")
@@ -64,12 +68,12 @@ def get_ad_data_from_db() -> list[GoogleAd]:
     return ads
 
 
-def get_ad_structured_outputs_from_db() -> list[AdStructuredOutput]:
+def get_ad_structured_outputs_from_db() -> List[AdStructuredOutput]:
     supabase_client = get_supabase_client()
     offset, batch_size = 0, 1000
-    analyses: list[AdStructuredOutput] = []
+    analyses: List[AdStructuredOutput] = []
     while True:
-        new_analyses: list[AdStructuredOutput] = [
+        new_analyses: List[AdStructuredOutput] = [
             AdStructuredOutput.model_validate(analysis)
             for analysis in supabase_client.table("ad_structured_output")
             .select("*")
@@ -84,10 +88,10 @@ def get_ad_structured_outputs_from_db() -> list[AdStructuredOutput]:
     return analyses
 
 
-def get_ad_analyses_from_db() -> list[AdAnalysis]:
+def get_ad_analyses_from_db() -> List[AdAnalysis]:
     supabase_client = get_supabase_client()
     offset, batch_size = 0, 1000
-    analyses: list[AdAnalysis] = []
+    analyses: List[AdAnalysis] = []
     while True:
         raw_analyses: list[dict[str, Any]] = (
             supabase_client.table("ad_structured_output")
@@ -108,7 +112,7 @@ def get_ad_analyses_from_db() -> list[AdAnalysis]:
     return analyses
 
 
-def get_features_and_metrics_from_db() -> list[JoinedFeatureMetric]:
+def get_features_and_metrics_from_db() -> List[JoinedFeatureMetric]:
     supabase_client = get_supabase_client()
     offset, batch_size = 0, 1000
     features: list[Feature] = []

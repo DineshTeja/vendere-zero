@@ -1,33 +1,31 @@
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 import os
 import json
 import asyncio
-import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pathlib import Path
 from dotenv import load_dotenv
 import logging
 from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
 from sklearn.metrics.pairwise import cosine_similarity  # type: ignore
-from supabase.client import create_client, ClientOptions
+from supabase.client import create_client
 import datetime
 import csv
 import uuid
 import re
-import random
-import aiohttp
-import traceback
-import pandas as pd
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+# import random
+# import aiohttp
+# import traceback
+# import pandas as pd
+# from collections import defaultdict
+# from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
-from supabase import create_client
 
 # Import LlamaIndex components
-from llama_index.core import VectorStoreIndex, Document
-from llama_index.core.storage import StorageContext
-from llama_index.vector_stores.supabase import SupabaseVectorStore
-from llama_index.llms.openai import OpenAI
+# from llama_index.core import VectorStoreIndex, Document
+# from llama_index.core.storage import StorageContext
+# from llama_index.vector_stores.supabase import SupabaseVectorStore
+# from llama_index.llms.openai import OpenAI
 
 # Load environment variables
 env_path = Path(__file__).parents[2] / ".env.local"
@@ -247,7 +245,7 @@ class KeywordVariantGenerator:
         """Estimate metrics for multiple keywords in parallel"""
         try:
             results = []
-            tasks = []
+            # tasks = []
 
             # Process keywords in batches
             for i in range(0, len(keywords), self.batch_size):

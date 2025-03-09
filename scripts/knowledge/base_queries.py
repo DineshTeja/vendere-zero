@@ -6,8 +6,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 import json
 import os
-import asyncio
-from typing import List, Dict, Any, Optional, Tuple, cast, Set
+from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 import requests
 import time
@@ -16,7 +15,6 @@ from collections import Counter, defaultdict
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
-import numpy as np
 from llama_index.core.llms import (
     CustomLLM,
     CompletionResponse,
@@ -26,10 +24,7 @@ from llama_index.core.llms import (
 from llama_index.core.llms.callbacks import llm_completion_callback
 from pathlib import Path
 from dotenv import load_dotenv
-from llama_index.core import PromptTemplate
 from company_context import COMPANY_CONTEXT
-from llama_index.program.openai import OpenAIPydanticProgram
-from llama_index.llms.openai import OpenAI
 from qa_templates import create_qa_templates
 
 
@@ -52,87 +47,30 @@ load_dotenv(env_path)
 
 class QueryRequest(BaseModel):
     query: str
-    deep_research: bool = False
+    deep_research: bool = False  # Parameter kept for backward compatibility
     detail_level: int = Field(default=50, ge=0, le=100)
+    attribution_analysis: bool = False  # Field for attribution analysis requests
 
 
-class SuggestedTask(BaseModel):
-    """A suggested task for the user to complete based on their query"""
+class AttributionData(BaseModel):
+    """Model for attribution data with campaign and channel metrics"""
 
-    task_type: str = Field(
-        description="Type of task: 'variant_generation' or 'suggested_query'"
-    )
-    title: str = Field(description="Short descriptive title of the task")
-    description: str = Field(
-        description="Detailed description of what this task would accomplish"
-    )
-    input_data: Dict[str, Any] = Field(
-        description="Input data for the task in the format required by the relevant API"
-    )
-    relevance_score: float = Field(
-        description="How relevant this task is to the query (0-1)"
-    )
-
-
-class ReportSection(BaseModel):
-    title: str
-    content: str
-    sources: List[Dict]
-
-
-class Report(BaseModel):
-    title: str
-    sections: List[ReportSection]
-    summary: str
-
-
-class DataPoint(BaseModel):
-    """A single piece of evidence from the knowledge base with its metadata."""
-
-    content: str = Field(description="The actual content/text of the data point")
-    source_type: str = Field(
-        description="Type of source: 'ad', 'market_research', or 'citation'"
-    )
-    url: str = Field(default="", description="URL to the source if available")
-    image_url: str = Field(
-        default="", description="URL to associated image if available"
-    )
-    relevance_score: float = Field(
-        description="Relevance score of this data point to the query"
-    )
-
-
-class ResearchArea(BaseModel):
-    """A specific area of research in the report with its findings and evidence."""
-
-    title: str = Field(description="Title of this research area")
-    format_guide: str = Field(
-        description="Specific format and structure for this section"
-    )
-    query_prompt: str = Field(
-        description="Customized prompt to generate this section's content"
-    )
-    supporting_data: List[DataPoint] = Field(
-        description="Evidence supporting the content"
-    )
-
-
-class StructuredReport(BaseModel):
-    """A structured report containing analysis of the knowledge base data."""
-
-    query: str = Field(description="The original query that prompted this report")
-    areas: List[ResearchArea] = Field(
-        description="Analysis areas with their format guides"
-    )
-    executive_summary: str = Field(
-        description="High-level summary of the entire report"
-    )
+    campaign_metrics: List[Dict[str, Any]] = []
+    channel_metrics: List[Dict[str, Any]] = []
+    top_performing_campaigns: List[Dict[str, Any]] = []
+    top_performing_channels: List[Dict[str, Any]] = []
+    top_performing_features: List[
+        Dict[str, Any]
+    ] = []  # Field for feature performance data
+    feature_category_analysis: str = ""  # Analysis of top features by category
+    feature_location_analysis: str = ""  # Analysis of top features by location
+    attribution_insights: str = ""
 
 
 class PerplexityLLM(CustomLLM):
     context_window: int = 4096
     num_output: int = 1024
-    model: str = "sonar-pro"
+    model: str = "sonar-reasoning-pro"
     temperature: float = 0.1
     api_key: str = None
     api_url: str = "https://api.perplexity.ai/chat/completions"
@@ -160,6 +98,25 @@ class PerplexityLLM(CustomLLM):
 
     @llm_completion_callback()
     def complete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
+        """Complete the prompt using streaming to capture thinking tokens, but return final result"""
+        # For non-reasoning models, just do a regular API call without streaming
+        if "reasoning" not in self.model:
+            return self._complete_without_streaming(prompt, **kwargs)
+
+        # For reasoning models, use streaming to capture thinking tokens
+        # but still return a complete response
+        full_response = ""
+
+        for response in self.stream_complete(prompt, **kwargs):
+            # Just collect the full response for returning at the end
+            full_response = response.text
+
+        return CompletionResponse(text=full_response)
+
+    def _complete_without_streaming(
+        self, prompt: str, **kwargs: Any
+    ) -> CompletionResponse:
+        """Standard non-streaming API call"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -169,7 +126,17 @@ class PerplexityLLM(CustomLLM):
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a specialized AI assistant focused on providing comprehensive analysis of marketing and competitive data.",
+                    "content": """You are a specialized AI assistant focused on providing comprehensive analysis of marketing and competitive data.
+
+When analyzing marketing performance and trends:
+1. Use the provided context whenever available for company-specific insights
+2. When market trends aren't explicitly provided in the context, utilize your knowledge of current market trends, competitor positions, and industry standards
+3. Always specify the source of your information - whether from the provided context or your general knowledge
+4. Never claim you don't have access to market trends - use your knowledge of marketing principles and trends to provide value
+5. Provide specific, actionable insights whenever possible
+6. Clearly label when you're using general knowledge versus the specific data provided
+
+Even when specific market data isn't provided, you should leverage your extensive knowledge of marketing principles, consumer behavior, and industry benchmarks to provide valuable insights.""",
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -194,12 +161,180 @@ class PerplexityLLM(CustomLLM):
 
     @llm_completion_callback()
     def stream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
-        response_text = self.complete(prompt, **kwargs).text
-        response = ""
-        # Simulate streaming by yielding one character at a time
-        for char in response_text:
-            response += char
-            yield CompletionResponse(text=response, delta=char)
+        """Stream complete with thinking token extraction and logging"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": """You are a specialized AI assistant focused on providing comprehensive analysis of marketing and competitive data.
+
+When analyzing marketing performance and trends:
+1. Use the provided context whenever available for company-specific insights
+2. When market trends aren't explicitly provided in the context, utilize your knowledge of current market trends, competitor positions, and industry standards
+3. Always specify the source of your information - whether from the provided context or your general knowledge
+4. Never claim you don't have access to market trends - use your knowledge of marketing principles and trends to provide value
+5. Provide specific, actionable insights whenever possible
+6. Clearly label when you're using general knowledge versus the specific data provided
+
+Even when specific market data isn't provided, you should leverage your extensive knowledge of marketing principles, consumer behavior, and industry benchmarks to provide valuable insights.""",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            # "max_tokens": self.num_output,
+            "temperature": self.temperature,
+            "stream": True,  # Enable streaming
+        }
+
+        try:
+            response = requests.post(
+                self.api_url, json=payload, headers=headers, stream=True
+            )
+            response.raise_for_status()
+
+            # Process the streaming response
+            accumulated_response = ""
+            current_thinking = ""
+            thinking_buffer = ""
+            in_thinking_block = False
+
+            # For building the complete response and extracting citations
+            complete_response_json = {}
+
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                # Skip the "data: " prefix and empty lines
+                line = line.decode("utf-8")
+                if not line.startswith("data: "):
+                    continue
+
+                # Remove the "data: " prefix
+                json_str = line[6:]
+
+                # Check for the stream end marker
+                if json_str == "[DONE]":
+                    break
+
+                try:
+                    # Parse the JSON content
+                    chunk = json.loads(json_str)
+
+                    # Add chunk data to our complete response
+                    # This will gradually build up the full response including citations
+                    for key, value in chunk.items():
+                        complete_response_json[key] = value
+
+                        # If we found citations, store them immediately
+                        if key == "citations" and isinstance(value, list):
+                            self.last_citations = value
+
+                    # Get the delta content
+                    delta_content = (
+                        chunk.get("choices", [{}])[0]
+                        .get("delta", {})
+                        .get("content", "")
+                    )
+
+                    if delta_content:
+                        # Check for thinking tags
+                        if "<think>" in delta_content and not in_thinking_block:
+                            # Start of thinking block
+                            in_thinking_block = True
+                            thinking_start_idx = delta_content.find("<think>") + len(
+                                "<think>"
+                            )
+                            thinking_content = delta_content[thinking_start_idx:]
+                            current_thinking += thinking_content
+                            thinking_buffer += thinking_content
+
+                            # Log the start of thinking
+                            print("\n--- PERPLEXITY THINKING STARTED ---")
+
+                        elif "</think>" in delta_content and in_thinking_block:
+                            # End of thinking block
+                            thinking_end_idx = delta_content.find("</think>")
+                            thinking_content = delta_content[:thinking_end_idx]
+                            current_thinking += thinking_content
+                            thinking_buffer += thinking_content
+
+                            # Print any remaining buffered thinking content
+                            if thinking_buffer:
+                                print(thinking_buffer)
+                                thinking_buffer = ""
+
+                            in_thinking_block = False
+                            print("--- PERPLEXITY THINKING COMPLETED ---\n")
+
+                            # Reset for next thinking block
+                            current_thinking = ""
+
+                            # Add the content after </think> to the accumulated response
+                            post_thinking_content = delta_content[
+                                thinking_end_idx + len("</think>") :
+                            ]
+                            accumulated_response += post_thinking_content
+
+                        elif in_thinking_block:
+                            # Within thinking block - accumulate and print in logical chunks
+                            current_thinking += delta_content
+                            thinking_buffer += delta_content
+
+                            # Print buffer contents when we have enough to make sense
+                            # or when we hit sentence endings
+                            if len(thinking_buffer) >= 50 or any(
+                                ending in thinking_buffer
+                                for ending in [". ", "! ", "? ", ".\n", "!\n", "?\n"]
+                            ):
+                                print(thinking_buffer, end="", flush=True)
+                                thinking_buffer = ""
+
+                        else:
+                            # Regular content outside thinking blocks
+                            accumulated_response += delta_content
+
+                        # Yield the current accumulation for both thinking and non-thinking parts
+                        # This gives the full output to the caller
+                        yield CompletionResponse(
+                            text=accumulated_response, delta=delta_content
+                        )
+
+                except json.JSONDecodeError:
+                    print(f"Failed to parse JSON: {json_str}")
+                    continue
+
+            # Print any remaining thinking buffer content
+            if thinking_buffer:
+                print(thinking_buffer)
+
+            # Final check for citations if we haven't found them yet
+            if not self.last_citations and "citations" in complete_response_json:
+                self.last_citations = complete_response_json["citations"]
+                print(
+                    f"Retrieved {len(self.last_citations)} citations from complete response"
+                )
+
+            # If we still don't have citations, check if they might be in the last message
+            if not self.last_citations and "choices" in complete_response_json:
+                for choice in complete_response_json.get("choices", []):
+                    if "message" in choice and "citations" in choice["message"]:
+                        self.last_citations = choice["message"]["citations"]
+                        print(
+                            f"Found {len(self.last_citations)} citations in final message"
+                        )
+                        break
+
+            return
+
+        except Exception as e:
+            self.last_citations = []  # Reset citations on error
+            print(f"Error in streaming call to Perplexity API: {str(e)}")
+            raise Exception(f"Error calling Perplexity streaming API: {str(e)}")
 
     def get_last_citations(self) -> List[str]:
         """Return citations from the last API call"""
@@ -231,6 +366,16 @@ class KnowledgeBase:
         self.keyword_index = {}
         self.doc_to_topic_map = {}
         self.topic_metadata = {}
+
+        # Raw attribution data cache - new addition
+        self.attribution_campaign_data = []
+        self.attribution_channel_data = []
+
+        # Initialize QA templates
+        self.qa_templates = create_qa_templates(
+            company_context=COMPANY_CONTEXT,
+            company_name=COMPANY_CONTEXT.get("name", "Company"),
+        )
 
         # Initialize the index and query engines
         self._initialize_index()
@@ -555,7 +700,13 @@ class KnowledgeBase:
     def _build_type_filters(self) -> Dict[str, List[str]]:
         """Build document type filters for faster filtering during retrieval"""
         # Scan all documents for their IDs by type
-        type_filters = {"ad": [], "market_research": [], "citation": []}
+        type_filters = {
+            "ad": [],
+            "market_research": [],
+            "citation": [],
+            "attribution_campaign": [],  # Add attribution campaign filter
+            "attribution_channel": [],  # Add attribution channel filter
+        }
         for doc_id, doc_info in self.document_cache.items():
             doc_type = doc_info.get("type")
             if doc_type in type_filters:
@@ -564,193 +715,418 @@ class KnowledgeBase:
 
     def _fetch_all_data(self, supabase: Client) -> List[Document]:
         """Fetch all relevant data from Supabase and convert to Documents"""
-        documents = []
         start_time = time.time()
         print("Fetching data from Supabase...")
 
-        # Fetch ad library data
-        ad_data = supabase.table("ad_structured_output").select("*").execute().data
-        for ad in ad_data:
+        # Initialize separate document lists for each type
+        library_documents = []
+        research_documents = []
+        feature_documents = []
+        attribution_documents = []  # New list for attribution documents
+
+        # 1. Fetch library items (visual content analysis)
+        print("Fetching library items (visual content)...")
+        library_items = supabase.table("library_items").select("*").execute().data
+        for item in library_items:
+            # Only include essential features and tones
+            features_str = ""
+            if item["features"] and len(item["features"]) > 0:
+                # Take only top 3 features
+                top_features = item["features"][:3]
+                features_str = f"F:{','.join(top_features)}"
+
+            sentiment_str = ""
+            if item["sentiment_tones"] and len(item["sentiment_tones"]) > 0:
+                # Take only top 2 tones
+                top_tones = item["sentiment_tones"][:2]
+                sentiment_str = f"T:{','.join(top_tones)}"
+                if item["avg_sentiment_confidence"]:
+                    sentiment_str += f"({item['avg_sentiment_confidence']:.1f})"
+
+            # Create minimal document text
+            desc = item["description"] or ""
+            if len(desc) > 100:  # Truncate long descriptions
+                desc = desc[:100] + "..."
+
+            item_text = f"""{item["type"]}|{item["name"] or ""}
+{desc}
+{features_str}
+{sentiment_str}"""
+
             doc = Document(
-                text=f"Ad Description: {ad['image_description']}\nImage URL: {ad['image_url']}",
-                extra_info={"type": "ad", "id": ad["id"], "url": ad["image_url"]},
+                text=item_text,
+                extra_info={
+                    "type": "visual",
+                    "id": item["id"],
+                    "url": item["preview_url"],
+                },
             )
-            documents.append(doc)
-            # Cache document by ID for faster retrieval
-            self.document_cache[ad["id"]] = {
-                "document": doc,
-                "type": "ad",
-                "text": doc.text,
-                "metadata": {"url": ad["image_url"]},
+            library_documents.append(doc)
+
+            # Minimal cache metadata
+            self.document_cache[item["id"]] = {
+                "type": "visual",
+                "text": item_text,
             }
 
-        # Fetch market research data
+        # 2. Fetch market research data (audience and competitive insights)
+        print("Fetching market research data (audience insights)...")
         research_data = supabase.table("market_research_v2").select("*").execute().data
         for research in research_data:
-            research_text = f"""
-            Intent Summary: {research["intent_summary"]}
-            Target Audience: {json.dumps(research["target_audience"], indent=2)}
-            Pain Points: {json.dumps(research["pain_points"], indent=2)}
-            Key Features: {json.dumps(research["key_features"], indent=2)}
-            Competitive Advantages: {json.dumps(research["competitive_advantages"], indent=2)}
-            Perplexity Insights: {research["perplexity_insights"]}
-            """
+            # Create compact text representation without large JSON dumps
+            target_audience = ""
+            if research["target_audience"]:
+                if isinstance(research["target_audience"], dict):
+                    # Extract just the key demographics
+                    demo = research["target_audience"].get("demographics", {})
+                    if demo:
+                        target_audience = f"Demographics: {', '.join(demo.keys())}"
+                elif isinstance(research["target_audience"], list):
+                    # Handle case where list items might be dictionaries
+                    audience_items = []
+                    for item in research["target_audience"][:3]:
+                        if isinstance(item, dict):
+                            # Take the first key or value from the dict as a string
+                            dict_keys = list(item.keys())
+                            if dict_keys:
+                                audience_items.append(str(dict_keys[0]))
+                        elif isinstance(item, str):
+                            audience_items.append(item)
+                        else:
+                            # For any other type, convert to string
+                            audience_items.append(str(item))
+
+                    if audience_items:
+                        target_audience = f"Target: {', '.join(audience_items)}"
+
+            # Extract main pain points without full JSON
+            pain_points = ""
+            if research["pain_points"] and isinstance(research["pain_points"], dict):
+                pain_points = (
+                    f"Pain: {', '.join(list(research['pain_points'].keys())[:3])}"
+                )
+
+            # Create compact document
+            research_text = f"""MR: {research["intent_summary"][:150]}
+{target_audience}
+{pain_points}"""
+
             doc = Document(
                 text=research_text,
-                extra_info={
-                    "type": "market_research",
-                    "id": research["id"],
-                    "image_url": research["image_url"],
-                },
+                extra_info={"type": "market_research", "id": research["id"]},
             )
-            documents.append(doc)
-            # Cache document
+            research_documents.append(doc)
             self.document_cache[research["id"]] = {
-                "document": doc,
                 "type": "market_research",
-                "text": doc.text,
-                "metadata": {"image_url": research["image_url"]},
+                "text": research_text,
             }
 
-        # Fetch citation research
-        citation_data = supabase.table("citation_research").select("*").execute().data
-        for citation in citation_data:
-            citation_text = f"""
-            Intent Summary: {citation["intent_summary"]}
-            Primary Intent: {citation["primary_intent"]}
-            Secondary Intents: {json.dumps(citation["secondary_intents"], indent=2)}
-            Market Segments: {json.dumps(citation["market_segments"], indent=2)}
-            Key Features: {json.dumps(citation["key_features"], indent=2)}
-            Price Points: {json.dumps(citation["price_points"], indent=2)}
-            Source URL: {citation["site_url"]}
-            """
+        # 3. Fetch feature performance metrics (analytics and insights)
+        print("Fetching feature performance metrics...")
+        feature_metrics = (
+            supabase.table("feature_metrics_summary").select("*").execute().data
+        )
+        for metric in feature_metrics:
+            if not metric["unique_feature"]:
+                continue
+
+            # Create compact performance metrics text
+            perf_text = []
+            if metric["avg_ctr"] is not None:
+                perf_text.append(f"CTR:{metric['avg_ctr']:.1%}")
+            if metric["avg_conversions"] is not None:
+                perf_text.append(f"Conv:{metric['avg_conversions']:.1f}")
+            if metric["avg_roas"] is not None:
+                perf_text.append(f"ROAS:{metric['avg_roas']:.1f}x")
+
+            # Limit categories and locations to top 2
+            top_cats = ""
+            if metric["categories_ranked"]:
+                top_cats = f"Cat:{','.join(metric['categories_ranked'][:2])}"
+
+            top_locs = ""
+            if metric["locations_ranked"]:
+                top_locs = f"Loc:{','.join(metric['locations_ranked'][:2])}"
+
+            # Create minimal document text
+            feature_text = f"""F: {metric["unique_feature"]}
+{" | ".join(perf_text)}
+{top_cats}
+{top_locs}"""
+
             doc = Document(
-                text=citation_text,
+                text=feature_text,
                 extra_info={
-                    "type": "citation",
-                    "id": citation["id"],
-                    "image_url": citation["image_url"],
-                    "url": citation["site_url"],
+                    "type": "feature_performance",
+                    "feature": metric["unique_feature"],
                 },
             )
-            documents.append(doc)
-            # Cache document
-            self.document_cache[citation["id"]] = {
-                "document": doc,
-                "type": "citation",
-                "text": doc.text,
-                "metadata": {
-                    "image_url": citation["image_url"],
-                    "url": citation["site_url"],
-                },
+            feature_documents.append(doc)
+            self.document_cache[metric["unique_feature"]] = {
+                "type": "feature_performance",
+                "text": feature_text,
             }
 
-        print(
-            f"Data fetching completed in {time.time() - start_time:.2f} seconds. Total documents: {len(documents)}"
-        )
-        return documents
+        # 4. Fetch enhanced attribution metrics (new section)
+        print("Fetching enhanced attribution metrics...")
+        # Fetch campaign metrics
+        try:
+            campaign_metrics = (
+                supabase.table("enhanced_ad_metrics_by_campaign")
+                .select("*")
+                .execute()
+                .data
+            )
+            # Store raw data in our cache for direct access later
+            self.attribution_campaign_data = campaign_metrics
+
+            print(f"Fetched {len(campaign_metrics)} campaign metrics records")
+
+            for metric in campaign_metrics:
+                if not metric["campaign_id"]:
+                    continue
+
+                # Create attribution metrics text with type marker for easier filtering
+                metric_text = f"""TYPE: attribution_campaign
+Campaign Attribution: {metric["campaign_id"]}
+CTR: {metric["avg_ctr"] if metric["avg_ctr"] is not None else "N/A"}
+Conv Rate: {metric["avg_conversion_rate"] if metric["avg_conversion_rate"] is not None else "N/A"}
+ROAS: {metric["avg_roas"] if metric["avg_roas"] is not None else "N/A"}
+Cost/Conv: {metric["cost_per_conversion"] if metric["cost_per_conversion"] is not None else "N/A"}
+Clicks: {metric["total_clicks"] if metric["total_clicks"] is not None else "N/A"}
+Impressions: {metric["total_impressions"] if metric["total_impressions"] is not None else "N/A"}
+Conversions: {metric["total_conversions"] if metric["total_conversions"] is not None else "N/A"}
+Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}"""
+
+                doc = Document(
+                    text=metric_text,
+                    extra_info={
+                        "type": "attribution_campaign",
+                        "id": metric["campaign_id"],  # Use campaign_id directly as id
+                        "raw_data": metric,
+                    },
+                )
+                attribution_documents.append(doc)
+                self.document_cache[metric["campaign_id"]] = {  # Store without prefix
+                    "type": "attribution_campaign",
+                    "text": metric_text,
+                    "data": metric,
+                }
+
+            # Add campaign metrics document to directly ensure they're findable
+            all_campaigns_doc = Document(
+                text=f"""TYPE: attribution_campaign_summary
+Attribution Data for All Campaigns
+Total campaigns analyzed: {len(campaign_metrics)}
+Metrics available: CTR, Conversion Rate, ROAS, Cost/Conversion, Clicks, Impressions, Conversions, Total Cost
+This document contains aggregated campaign performance data for attribution analysis.""",
+                extra_info={"type": "attribution_campaign_summary"},
+            )
+            attribution_documents.append(all_campaigns_doc)
+        except Exception as e:
+            print(f"Error fetching campaign metrics: {str(e)}")
+
+        # Fetch channel metrics
+        try:
+            channel_metrics = (
+                supabase.table("enhanced_ad_metrics_by_channel")
+                .select("*")
+                .execute()
+                .data
+            )
+            # Store raw data in our cache for direct access later
+            self.attribution_channel_data = channel_metrics
+
+            print(f"Fetched {len(channel_metrics)} channel metrics records")
+
+            for metric in channel_metrics:
+                if not metric["channel"]:
+                    continue
+
+                # Create channel attribution metrics text with type marker for easier filtering
+                metric_text = f"""TYPE: attribution_channel
+Channel Attribution: {metric["channel"]} ({metric["date"] or "All time"})
+CTR: {metric["avg_ctr"] if metric["avg_ctr"] is not None else "N/A"}
+CPC: {metric["avg_cpc"] if metric["avg_cpc"] is not None else "N/A"}
+CPM: {metric["avg_cpm"] if metric["avg_cpm"] is not None else "N/A"}
+Conv Rate: {metric["avg_conversion_rate"] if metric["avg_conversion_rate"] is not None else "N/A"}
+Clicks: {metric["total_clicks"] if metric["total_clicks"] is not None else "N/A"}
+Impressions: {metric["total_impressions"] if metric["total_impressions"] is not None else "N/A"}
+Conversions: {metric["total_conversions"] if metric["total_conversions"] is not None else "N/A"}
+Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}"""
+
+                # Create a unique ID that combines channel and date
+                channel_id = f"{metric['channel']}_{metric['date']}"
+
+                doc = Document(
+                    text=metric_text,
+                    extra_info={
+                        "type": "attribution_channel",
+                        "id": channel_id,  # Use combined ID directly
+                        "raw_data": metric,
+                    },
+                )
+                attribution_documents.append(doc)
+                self.document_cache[channel_id] = {  # Store without prefix
+                    "type": "attribution_channel",
+                    "text": metric_text,
+                    "data": metric,
+                }
+
+            # Add channel metrics document to directly ensure they're findable
+            all_channels_doc = Document(
+                text=f"""TYPE: attribution_channel_summary
+Attribution Data for All Channels
+Total channels analyzed: {len(set(m["channel"] for m in channel_metrics if m["channel"]))}
+Metrics available: CTR, CPC, CPM, Conversion Rate, Clicks, Impressions, Conversions, Total Cost
+This document contains aggregated channel performance data for attribution analysis.""",
+                extra_info={"type": "attribution_channel_summary"},
+            )
+            attribution_documents.append(all_channels_doc)
+        except Exception as e:
+            print(f"Error fetching channel metrics: {str(e)}")
+
+        # Ensure type filters are updated to use the new IDs
+        self.type_filters = {
+            "ad": [],
+            "market_research": [],
+            "citation": [],
+            "attribution_campaign": [],
+            "attribution_channel": [],
+        }
+        for doc_id, doc_info in self.document_cache.items():
+            doc_type = doc_info.get("type")
+            if doc_type in self.type_filters:
+                self.type_filters[doc_type].append(doc_id)
+
+        # Add attribution context document
+        attribution_context = """ATTRIBUTION DATA ANALYSIS
+These documents contain detailed campaign and channel attribution metrics including:
+- Campaign performance with CTR, conversion rate, ROAS metrics
+- Channel performance across different time periods
+- Cost metrics including CPC, CPM, and cost per conversion
+- Volume metrics including clicks, impressions, and conversions
+This data is ideal for analyzing marketing performance and ROI across campaigns and channels."""
+
+        # Add type-specific context to each document list
+        visual_context = """VISUAL CONTENT ANALYSIS DOCUMENTS
+These documents contain analysis of visual content (images/videos) including:
+- Visual features and their locations in the content
+- Sentiment analysis and confidence scores
+- Content type (image/video) and descriptive metadata"""
+
+        research_context = """MARKET RESEARCH AND AUDIENCE ANALYSIS DOCUMENTS
+These documents contain market and audience insights including:
+- Target audience demographics and behaviors
+- Customer pain points and needs
+- Competitive analysis and advantages
+- Market positioning and strategic insights"""
+
+        performance_context = """FEATURE PERFORMANCE ANALYTICS DOCUMENTS
+These documents contain performance metrics for specific features including:
+- Engagement metrics (clicks, impressions, CTR)
+- Conversion metrics and ROAS
+- Best performing categories and locations
+- Related content references"""
+
+        # Combine all documents with their context
+        all_documents = []
+        if library_documents:
+            all_documents.append(Document(text=visual_context))
+            all_documents.extend(library_documents)
+        if research_documents:
+            all_documents.append(Document(text=research_context))
+            all_documents.extend(research_documents)
+        if feature_documents:
+            all_documents.append(Document(text=performance_context))
+            all_documents.extend(feature_documents)
+        if attribution_documents:
+            all_documents.append(Document(text=attribution_context))
+            all_documents.extend(attribution_documents)
+
+        print(f"Data fetching completed in {time.time() - start_time:.2f} seconds.")
+        print(f"Total documents by type:")
+        print(f"- Visual Content Analysis: {len(library_documents)}")
+        print(f"- Market Research: {len(research_documents)}")
+        print(f"- Feature Performance: {len(feature_documents)}")
+        print(f"- Attribution Data: {len(attribution_documents)}")
+
+        return all_documents
 
     def _initialize_index(self):
         """Initialize the vector store and index, LLMs, and query engines"""
+        print("Fetching and processing documents...")
         documents = self._fetch_all_data(self.supabase)
+
+        # Create separate indices for each document type to avoid metadata overflow
+        print("Creating separate indices for each document type...")
+
+        # Get document counts
+        library_count = sum(
+            1
+            for doc in documents
+            if "VISUAL CONTENT ANALYSIS" in doc.text
+            or doc.extra_info.get("type") == "visual"
+        )
+        research_count = sum(
+            1
+            for doc in documents
+            if "MARKET RESEARCH" in doc.text
+            or doc.extra_info.get("type") == "market_research"
+        )
+        feature_count = sum(
+            1
+            for doc in documents
+            if "FEATURE PERFORMANCE" in doc.text
+            or doc.extra_info.get("type") == "feature_performance"
+        )
+
+        print(f"Processing {library_count} visual content documents...")
+        print(f"Processing {research_count} market research documents...")
+        print(f"Processing {feature_count} feature performance documents...")
+
+        # Simplify documents before indexing by creating new lightweight documents
+        simplified_documents = []
+
+        for doc in documents:
+            # Preserve the text but minimize extra_info
+            simple_doc = Document(
+                text=doc.text,
+                # Keep only essential metadata
+                extra_info={"type": doc.extra_info.get("type", "unknown")},
+            )
+            simplified_documents.append(simple_doc)
+
+        # Set up the vector store
         vector_store = SupabaseVectorStore(
             postgres_connection_string=os.getenv("DB_CONNECTION"),
             collection_name="library_items",
         )
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-        # Create detailed company-specific prompt template
-        company_name = COMPANY_CONTEXT.get("name", "Company")
-        company_context = f"""You are an AI assistant for {company_name}, providing detailed analysis based on our company context.
-        
-        Key Company Context:
-        - Industry: {COMPANY_CONTEXT.get("industry", "Not specified")}
-        - Core Products: {", ".join(COMPANY_CONTEXT.get("core_business", {}).get("primary_products", ["Not specified"]))}
-        - Key Markets: {", ".join(COMPANY_CONTEXT.get("core_business", {}).get("key_markets", ["Not specified"]))}
-        - Target Segments: {", ".join(COMPANY_CONTEXT.get("core_business", {}).get("target_segments", ["Not specified"]))}
-        
-        Strategic Focus Areas:
-        {self._format_strategic_priorities()}
-        
-        Market Position:
-        - Competitive Advantages: {", ".join(COMPANY_CONTEXT.get("market_position", {}).get("competitive_advantages", ["Not specified"]))}
-        - Key Competitors: {self._format_competitors()}
-        - Current Market Trends: {", ".join(COMPANY_CONTEXT.get("market_position", {}).get("market_trends", {}).get("consumer_preferences", ["Not specified"]))}"""
+        # Use text splitter that doesn't rely on metadata
+        from llama_index.core.node_parser import SentenceSplitter
 
-        # Initialize QA templates for different detail levels
-        self.qa_templates = create_qa_templates(company_context, company_name)
+        # Configure settings for indexing
+        Settings.chunk_size = 4096  # Use larger chunks
+        Settings.chunk_overlap = 50
 
+        # Create the index with the custom text splitter
+        print("Creating vector index with simplified documents...")
         self.index = VectorStoreIndex.from_documents(
-            documents, storage_context=storage_context
+            simplified_documents,
+            storage_context=storage_context,
+            transformations=[SentenceSplitter(chunk_size=4096, chunk_overlap=50)],
         )
 
-        # Initialize both LLMs
+        # Initialize Perplexity LLM for standard queries
         self.perplexity_llm = PerplexityLLM(model="sonar-pro", temperature=0.1)
-        openai_llm = OpenAI(model="gpt-4o-mini", temperature=0.1)
-
-        # First set up OpenAI for structured program
-        Settings.llm = openai_llm
-        Settings.context_window = 8000
-        Settings.num_output = 4000
-
-        # Create structured program with OpenAI explicitly
-        structured_prompt = f"""{company_context}
-            
-            Analyze the provided data and generate a structured report from {company_name}'s perspective.
-            Focus on detailed analysis with comprehensive evidence and patterns.
-            
-            Available Data Types:
-            - Market research with intent summaries and target audiences
-            - Competitor citations with features and pricing
-            - Ad analysis with visual descriptions
-            
-            Query: {{query}}
-            Retrieved Context: {{context}}
-            
-            Return a structured report with these exact components:
-            1. query: The original query text
-            2. areas: A list of 3-4 research areas relevant to our priorities, each containing:
-               - title: Clear section title aligned with our context
-               - format_guide: Detailed format/structure (4-5 paragraphs per section)
-               - query_prompt: Detailed prompt for company-specific analysis
-               - supporting_data: List of relevant data points
-            3. executive_summary: A thorough summary for leadership (2-3 paragraphs)
-            
-            Ensure each area:
-            - Aligns with our strategic priorities
-            - Considers our competitive positioning
-            - Addresses our current challenges
-            - Provides actionable insights
-            - Maintains our market perspective"""
-
-        self.structured_program = OpenAIPydanticProgram.from_defaults(
-            output_cls=StructuredReport,
-            llm=openai_llm,
-            prompt_template_str=structured_prompt,
-            verbose=True,
-        )
-
-        # Set up research query engine with OpenAI
-        self.research_query_engine = self.index.as_query_engine(
-            similarity_top_k=50,
-            response_mode="refine",
-            text_qa_template=self.qa_templates["standard"],
-            llm=openai_llm,  # Explicitly pass OpenAI LLM
-        )
-
-        # Now switch to Perplexity for regular queries
         Settings.llm = self.perplexity_llm
-
-        # # Initialize regular query engine with Perplexity
-        # self.query_engine = self.index.as_query_engine(
-        #     similarity_top_k=120,
-        #     response_mode="compact",
-        #     text_qa_template=self.qa_templates["compact"],
-        #     llm=self.perplexity_llm,  # Explicitly pass Perplexity LLM
-        # )
+        Settings.context_window = 4096
+        Settings.num_output = 1024
 
         # Create extended context for other methods
-        self.company_context = f"""You are an AI assistant for {company_name}, 
+        self.company_context = f"""You are an AI assistant for {COMPANY_CONTEXT.get("name", "Company")}, 
         focusing on our company's specific context and strategic priorities.
         
         Key Company Context:
@@ -770,131 +1146,6 @@ class KnowledgeBase:
         Current Challenges:
         {self._format_challenges()}
         """
-
-    async def generate_section(self, area: ResearchArea) -> ReportSection:
-        """Generate a single section of the report with retries and error handling"""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # Query with the custom prompt for this section using research query engine
-                section_response = self.research_query_engine.query(
-                    f"""Generate a detailed analysis section about {area.title}.
-                    
-                    Specific Instructions:
-                    {area.query_prompt}
-
-                    Format your response using this structure: {area.format_guide}
-                    
-                    IMPORTANT: You must generate a NEW, DETAILED response. Never repeat or reference a previous answer.
-                    
-                    Requirements:
-                    - Minimum 4-5 detailed paragraphs
-                    - Specific examples and evidence
-                    - Clear data citations
-                    - In-depth analysis of patterns
-                    - Comprehensive coverage of available data
-                    
-                    If you cannot generate a proper response, raise an error instead of returning a placeholder."""
-                )
-
-                content = str(section_response)
-
-                # Check for invalid responses
-                invalid_responses = [
-                    "Repeat the original answer",
-                    "I cannot generate",
-                    "I apologize",
-                    "As an AI",
-                ]
-
-                if any(phrase in content for phrase in invalid_responses):
-                    raise ValueError("Invalid response detected")
-
-                if len(content.split()) < 100:  # Minimum word count check
-                    raise ValueError("Response too short")
-
-                # Collect sources
-                sources = [
-                    {
-                        "type": source_node.node.extra_info.get("type", "unknown"),
-                        "content": source_node.node.text,
-                        "url": source_node.node.extra_info.get("url", ""),
-                        "image_url": source_node.node.extra_info.get("image_url", ""),
-                        "relevance_score": float(source_node.score),
-                    }
-                    for source_node in section_response.source_nodes
-                ]
-
-                if not sources:
-                    raise ValueError("No sources found in response")
-
-                return ReportSection(title=area.title, content=content, sources=sources)
-
-            except Exception:
-                if attempt == max_retries - 1:  # Last attempt
-                    # If all retries failed, generate a simplified but valid response
-                    basic_response = self._fast_query_engine(
-                        query=f"""Provide a basic but valid analysis of {area.title}.
-                        Focus on the most important facts and evidence available.
-                        Must include at least 2-3 paragraphs with specific data points.""",
-                        detail_level=50,
-                    )
-
-                    return ReportSection(
-                        title=area.title,
-                        content=str(basic_response["response"]),
-                        sources=[
-                            {
-                                "type": source["extra_info"].get("type", "unknown"),
-                                "content": source["text"],
-                                "url": source["extra_info"].get("url", ""),
-                                "image_url": source["extra_info"].get("image_url", ""),
-                                "relevance_score": float(source["score"]),
-                            }
-                            for source in basic_response["sources"][:10]
-                        ],
-                    )
-                else:
-                    # Wait briefly before retrying
-                    await asyncio.sleep(1)
-                    continue
-        return None
-
-    async def generate_report(self, query: str) -> Report:
-        """Generates a structured report using OpenAI"""
-        # Get initial context and plan the report structure
-        initial_response = self.research_query_engine.query(  # Use research engine for initial query too
-            f"""Analyze this query and determine the most effective way to structure a detailed report: {query}
-            
-            For each major area to cover, specify:
-            1. The title of the section
-            2. The ideal format/structure for presenting that specific type of information (minimum 4-5 paragraphs)
-            3. A detailed prompt that will generate comprehensive analysis
-            
-            Consider the types of data available:
-            - Market research with intent summaries and target audiences
-            - Competitor citations with features and pricing
-            - Ad analysis with visual descriptions
-            
-            Focus on creating sections that will provide unique, valuable insights rather than basic summaries.
-            Each section should require detailed analysis with multiple examples and data points."""
-        )
-
-        # Generate structured report plan
-        plan = self.structured_program(query=query, context=str(initial_response))
-
-        # Generate all sections in parallel with error handling
-        section_tasks = [self.generate_section(area) for area in plan.areas]
-        sections = await asyncio.gather(*section_tasks, return_exceptions=True)
-
-        # Filter out any failed sections and log them
-        valid_sections = [
-            section for section in sections if isinstance(section, ReportSection)
-        ]
-
-        return Report(
-            title=query, sections=valid_sections, summary=plan.executive_summary
-        )
 
     @lru_cache(maxsize=100)
     def _get_cached_query_result(self, query_key: str) -> Optional[Dict[str, Any]]:
@@ -921,24 +1172,145 @@ class KnowledgeBase:
             print(f"Cache hit for query: {query[:30]}...")
             return cached_result
 
-        # Get raw retriever for faster direct operations
-        retriever = self.index.as_retriever(similarity_top_k=top_k)
+        # Special case for attribution data - use the directly cached data
+        if types and (
+            "attribution_campaign" in types or "attribution_channel" in types
+        ):
+            print(f"Using direct attribution data retrieval for types: {types}")
+            results = []
 
-        # Apply type filtering during retrieval if specified
+            # If requesting campaign attribution, add campaign metrics
+            if "attribution_campaign" in types and self.attribution_campaign_data:
+                print(
+                    f"Adding {len(self.attribution_campaign_data)} campaign metrics to results"
+                )
+                for metric in self.attribution_campaign_data:
+                    # Create a result entry for each campaign metric
+                    text = f"""Campaign Attribution: {metric["campaign_id"]}
+CTR: {metric["avg_ctr"] if metric["avg_ctr"] is not None else "N/A"}
+Conv Rate: {metric["avg_conversion_rate"] if metric["avg_conversion_rate"] is not None else "N/A"}
+ROAS: {metric["avg_roas"] if metric["avg_roas"] is not None else "N/A"}
+Cost/Conv: {metric["cost_per_conversion"] if metric["cost_per_conversion"] is not None else "N/A"}
+Clicks: {metric["total_clicks"] if metric["total_clicks"] is not None else "N/A"}
+Impressions: {metric["total_impressions"] if metric["total_impressions"] is not None else "N/A"}
+Conversions: {metric["total_conversions"] if metric["total_conversions"] is not None else "N/A"}
+Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}"""
+
+                    results.append(
+                        {
+                            "text": text,
+                            "score": 0.95,  # High score since this is direct data
+                            "extra_info": {
+                                "type": "attribution_campaign",
+                                "id": metric["campaign_id"],
+                                "raw_data": metric,
+                                "ad_id": metric["ad_id"],
+                                "image_url": metric["image_url"],
+                            },
+                        }
+                    )
+
+            # If requesting channel attribution, add channel metrics
+            if "attribution_channel" in types and self.attribution_channel_data:
+                print(
+                    f"Adding {len(self.attribution_channel_data)} channel metrics to results"
+                )
+                for metric in self.attribution_channel_data:
+                    # Create a result entry for each channel metric
+                    text = f"""Channel Attribution: {metric["channel"]} ({metric["date"] or "All time"})
+CTR: {metric["avg_ctr"] if metric["avg_ctr"] is not None else "N/A"}
+CPC: {metric["avg_cpc"] if metric["avg_cpc"] is not None else "N/A"}
+CPM: {metric["avg_cpm"] if metric["avg_cpm"] is not None else "N/A"}
+Conv Rate: {metric["avg_conversion_rate"] if metric["avg_conversion_rate"] is not None else "N/A"}
+Clicks: {metric["total_clicks"] if metric["total_clicks"] is not None else "N/A"}
+Impressions: {metric["total_impressions"] if metric["total_impressions"] is not None else "N/A"}
+Conversions: {metric["total_conversions"] if metric["total_conversions"] is not None else "N/A"}
+Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}"""
+
+                    results.append(
+                        {
+                            "text": text,
+                            "score": 0.95,  # High score since this is direct data
+                            "extra_info": {
+                                "type": "attribution_channel",
+                                "id": f"{metric['channel']}_{metric['date']}",
+                                "raw_data": metric,
+                            },
+                        }
+                    )
+
+            # If we have direct results, return them
+            if results:
+                # Sort by relevance (if we had a way to determine query relevance)
+                results = results[:top_k]
+                self.query_cache[cache_key] = (results, time.time())
+                print(
+                    f"Direct attribution retrieval completed in {time.time() - start_time:.2f} seconds. Retrieved {len(results)} records."
+                )
+                return results
+            else:
+                print("No direct attribution data found, falling back to vector search")
+
+        # Get raw retriever for faster direct operations
+        retriever = self.index.as_retriever(
+            similarity_top_k=top_k * 3 if types else top_k
+        )  # Get more results if filtering
+
+        # Retrieve nodes first without any filtering
+        nodes = retriever.retrieve(query)
+
+        # Apply type filtering after retrieval if specified
         if types:
+            print(f"Filtering results for types: {types}")
             # Use type filters to get document IDs of specified types
             filtered_ids = []
             for doc_type in types:
                 filtered_ids.extend(self.type_filters.get(doc_type, []))
 
-            # If we have type filters, apply them in the retrieval
+            # Filter nodes manually after retrieval if we have type filters
             if filtered_ids:
-                # This assumes the retriever supports filtering, may need adjustment
-                nodes = retriever.retrieve(query, filter_ids=filtered_ids)
+                # Instead of looking for 'id' directly, check the text content
+                # and metadata for matches with our filtered IDs
+                filtered_nodes = []
+
+                for node in nodes:
+                    # Check if the node's text content contains any of our target IDs
+                    node_text = node.node.text if hasattr(node.node, "text") else ""
+
+                    # Check if extra_info contains our type
+                    node_type = None
+                    if hasattr(node.node, "extra_info") and isinstance(
+                        node.node.extra_info, dict
+                    ):
+                        node_type = node.node.extra_info.get("type")
+
+                    # Add node if it matches any of our filtered types
+                    if node_type in types:
+                        filtered_nodes.append(node)
+                        continue
+
+                    # Check for the TYPE: marker we added in the text
+                    if any(f"TYPE: {t}" in node_text for t in types):
+                        filtered_nodes.append(node)
+                        continue
+
+                    # Check if the text contains any of our target IDs or type keywords
+                    if any(f_id in node_text for f_id in filtered_ids):
+                        filtered_nodes.append(node)
+                        continue
+
+                    # Try one more check - look for attribution keywords in the text
+                    if any(t in node_text.lower() for t in types):
+                        filtered_nodes.append(node)
+
+                # If filtering gave us results, use them; otherwise fall back to all nodes
+                if filtered_nodes:
+                    print(
+                        f"Filtered from {len(nodes)} to {len(filtered_nodes)} nodes based on type"
+                    )
+                    nodes = filtered_nodes
             else:
-                nodes = retriever.retrieve(query)
-        else:
-            nodes = retriever.retrieve(query)
+                print(f"No nodes matched the type filters, falling back to all results")
 
         # Sort by relevance and limit to top_k
         nodes = sorted(nodes, key=lambda x: x.score, reverse=True)[:top_k]
@@ -946,11 +1318,18 @@ class KnowledgeBase:
         # Convert to lightweight format
         results = []
         for node in nodes:
+            # Extract extra_info safely
+            extra_info = {}
+            if hasattr(node.node, "extra_info") and node.node.extra_info:
+                extra_info = node.node.extra_info
+
             results.append(
                 {
-                    "text": node.node.text,
+                    "text": node.node.text
+                    if hasattr(node.node, "text")
+                    else str(node.node),
                     "score": float(node.score),
-                    "extra_info": node.node.extra_info,
+                    "extra_info": extra_info,
                 }
             )
 
@@ -976,9 +1355,12 @@ class KnowledgeBase:
 
         # Choose LLM model based on detail level
         if detail_level < 50:
-            self.perplexity_llm.model = "sonar"
-        else:
             self.perplexity_llm.model = "sonar-pro"
+        else:
+            self.perplexity_llm.model = "sonar-reasoning-pro"
+            print(
+                "Using reasoning model for detailed analysis (will show chain-of-thought)"
+            )
 
         # Get template based on detail level
         if detail_level < 50:
@@ -1045,7 +1427,13 @@ class KnowledgeBase:
         prompt = template.format(query_str=query, context_str=context_text)
 
         # Get response from LLM
-        response = self.perplexity_llm.complete(prompt)
+        if "reasoning" in self.perplexity_llm.model:
+            print("Using streaming for chain-of-thought capture...")
+            # Use streaming to capture thinking, but get final response
+            response = self.perplexity_llm.complete(prompt)
+        else:
+            # Standard non-streaming for regular models
+            response = self.perplexity_llm.complete(prompt)
 
         llm_time = time.time() - llm_start
         print(f"Analysis completed in {llm_time:.2f} seconds")
@@ -1062,162 +1450,467 @@ class KnowledgeBase:
             },
         }
 
-    def _generate_suggested_tasks(
-        self, query: str, response_text: str, sources: List[Dict]
-    ) -> List[SuggestedTask]:
-        """Generate suggested tasks based on the query and response using LLM"""
-        try:
-            # Extract keywords to provide context for the LLM
-            keywords = self._extract_keywords_from_query(query)
-
-            # Prepare context from sources (limited to avoid token overflow)
-            source_context = []
-            for i, source in enumerate(sources[:5]):  # Limit to first 5 sources
-                source_type = source.get("extra_info", {}).get("type", "unknown")
-                source_context.append(
-                    f"Source {i + 1} ({source_type}): {source.get('text', '')[:200]}..."
-                )
-
-            source_context_str = "\n".join(source_context)
-
-            # Construct the prompt to generate task suggestions
-            suggested_tasks_prompt = f"""Based on the following user query, response, and source data, generate 3-5 suggested follow-up tasks.
-
-USER QUERY: "{query}"
-
-RESPONSE SUMMARY: {response_text[:500]}...
-
-SOURCES:
-{source_context_str}
-
-EXTRACTED KEYWORDS: {", ".join(keywords)}
-
-Please generate two types of tasks:
-1. "variant_generation" tasks - For creating ad variants based on the query context
-2. "suggested_query" tasks - For follow-up research queries to explore related topics
-
-Each task must strictly follow this JSON format:
-{{
-  "task_type": "variant_generation" or "suggested_query",
-  "title": "Brief descriptive title",
-  "description": "Detailed description of what this task would accomplish",
-  "input_data": {{
-    // For variant_generation tasks:
-    "keywords": [
-      {{ "term": "keyword1", "volume": 1000, "intent": "informational", "difficulty": 0.5 }},
-      // more keywords...
-    ],
-    "elements": [
-      {{ "type": "headline", "location": "top", "code": "<h1>{{{{text}}}}</h1>", "text": "Compelling headline text" }},
-      {{ "type": "body", "location": "middle", "code": "<p>{{{{text}}}}</p>", "text": "Informative body text" }},
-      {{ "type": "cta", "location": "bottom", "code": "<button>{{{{text}}}}</button>", "text": "Action-oriented CTA" }}
-    ],
-    "target_markets": ["Market1", "Market2", "Market3"]
-    
-    // For suggested_query tasks:
-    "query": "Follow-up query text",
-    "deep_research": true/false,
-    "detail_level": number between 50-85
-  }},
-  "relevance_score": number between 0.0-1.0
-}}
-
-Return a valid JSON array containing these tasks. Do not include any explanations or text outside the JSON array.
-"""
-
-            # Use the LLM to generate suggestions - choose an appropriate LLM model
-            # For complex structured output, OpenAI might be more reliable than Perplexity
-            if hasattr(self, "llm") and self.llm:
-                llm_for_tasks = self.llm  # Use existing OpenAI LLM if available
-            else:
-                # Create a new OpenAI instance with appropriate settings for structured output
-                llm_for_tasks = OpenAI(model="gpt-4o-mini", temperature=0.2)
-
-            # Get the LLM response
-            response = llm_for_tasks.complete(suggested_tasks_prompt)
-            response_text = response.text
-
-            # Extract the JSON array from the response
-            # Find anything that looks like a JSON array
-            json_match = re.search(r"\[\s*\{.*\}\s*\]", response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-            else:
-                # Fallback: assume the entire response is JSON
-                json_str = response_text
-
-            # Parse the JSON into Python objects
-            try:
-                task_dicts = json.loads(json_str)
-
-                # Convert dictionaries to SuggestedTask objects
-                suggested_tasks = []
-                for task_dict in task_dicts:
-                    # Validate the task has all required fields
-                    required_fields = [
-                        "task_type",
-                        "title",
-                        "description",
-                        "input_data",
-                        "relevance_score",
-                    ]
-                    if all(field in task_dict for field in required_fields):
-                        suggested_tasks.append(SuggestedTask(**task_dict))
-
-                return suggested_tasks
-            except json.JSONDecodeError:
-                print(f"Error parsing LLM response as JSON: {response_text[:100]}...")
-                # Fall back to empty list if JSON parsing fails
-                return []
-        except Exception as e:
-            print(f"Error generating suggested tasks: {str(e)}")
-            return []
-
     async def query(
-        self, query: str, deep_research: bool = False, detail_level: int = 50
+        self,
+        query: str,
+        deep_research: bool = False,  # Parameter kept for backward compatibility
+        detail_level: int = 50,
+        attribution_analysis: bool = False,
     ) -> dict:
-        """Enhanced query method that supports both simple queries and structured reports"""
-        if not deep_research:
-            # Use the optimized fast query engine instead of the standard query engine
+        """Enhanced query method that supports attribution analysis"""
+        attribution_data = None
+
+        # Check if query contains attribution-related terms
+        attribution_keywords = [
+            "attribution",
+            "campaign performance",
+            "channel performance",
+            "roas",
+            "roi",
+            "conversion rate",
+            "ctr",
+            "cpc",
+            "cpm",
+            "which campaigns",
+            "which channels",
+            "best performing",
+            "campaign metrics",
+            "marketing performance",
+            "ad spend",
+            "visual features",  # Added visual feature related keywords
+            "feature performance",
+            "visual elements",
+            "best categories",
+            "top locations",
+        ]
+
+        has_attribution_terms = any(
+            keyword in query.lower() for keyword in attribution_keywords
+        )
+
+        # If attribution analysis is explicitly requested or the query contains attribution terms
+        if attribution_analysis or has_attribution_terms:
+            attribution_data = self.get_attribution_data(query)
+
+            # Use the optimized fast query engine (always use this implementation now)
             print(f"Processing query with detail level {detail_level}: {query}")
             result = self._fast_query_engine(query, detail_level)
 
-            # Generate suggested tasks based on the query and response
-            suggested_tasks = self._generate_suggested_tasks(
-                query=query, response_text=result["response"], sources=result["sources"]
-            )
+        # Add attribution data to the result if available
+        response_text = result["response"]
+
+        # If we have attribution data, extend the response with specific attribution insights
+        if attribution_data:
+            # Prepare an enhanced response with attribution data
+            attribution_section = f"""
+
+ATTRIBUTION ANALYSIS:
+{attribution_data.attribution_insights}
+
+Top Performing Campaigns:
+{self._format_top_performers(attribution_data.top_performing_campaigns, "campaign")}
+
+Top Performing Channels:
+{self._format_top_performers(attribution_data.top_performing_channels, "channel")}
+
+Top Performing Visual Features:
+{self._format_top_features(attribution_data.top_performing_features)}
+
+{attribution_data.feature_category_analysis}
+
+{attribution_data.feature_location_analysis}
+"""
+            # Add attribution section to the response
+            response_text += attribution_section
 
             return {
-                "response": result["response"],
+                "response": response_text,
                 "sources": result["sources"],
                 "citations": result["citations"],
-                "suggested_tasks": [task.dict() for task in suggested_tasks],
+                "attribution_data": attribution_data.dict()
+                if attribution_data
+                else None,
                 "metadata": {
                     "detail_level": detail_level,
                     "retrieval_time": result["timing"]["retrieval_time"],
                     "llm_time": result["timing"]["llm_time"],
                     "total_time": result["timing"]["total_time"],
                     "llm_model": self.perplexity_llm.model,
+                    "has_attribution_data": attribution_data is not None,
+                    "deep_research": deep_research,  # Keep for consistency but it doesn't change behavior now
                 },
             }
+
+    def _format_top_performers(self, performers, performer_type):
+        """Format top performers data for readable output"""
+        if not performers:
+            return "No data available"
+
+        lines = []
+        for idx, item in enumerate(performers):
+            if performer_type == "campaign":
+                lines.append(
+                    f"{idx + 1}. Campaign: {item.get('campaign_id', 'Unknown')}"
+                )
+                lines.append(f"   ROAS: {item.get('avg_roas', 'N/A')}")
+                lines.append(f"   Conv Rate: {item.get('avg_conversion_rate', 'N/A')}")
+                lines.append(f"   CTR: {item.get('avg_ctr', 'N/A')}")
+                lines.append(f"   Cost/Conv: ${item.get('cost_per_conversion', 'N/A')}")
+                lines.append("")
+            else:  # channel
+                lines.append(f"{idx + 1}. Channel: {item.get('channel', 'Unknown')}")
+                lines.append(f"   CTR: {item.get('avg_ctr', 'N/A')}")
+                lines.append(f"   CPC: ${item.get('avg_cpc', 'N/A')}")
+                lines.append(f"   CPM: ${item.get('avg_cpm', 'N/A')}")
+                lines.append(f"   Conv Rate: {item.get('avg_conversion_rate', 'N/A')}")
+                lines.append("")
+
+        return "\n".join(lines)
+
+    def _format_top_features(self, features):
+        """Format top performing visual features for readable output"""
+        if not features:
+            return "No visual feature data available"
+
+        lines = []
+        lines.append(
+            "The following visual features have the highest performance metrics:"
+        )
+        lines.append("")
+
+        for idx, item in enumerate(features):
+            feature_name = item.get("unique_feature", "Unknown")
+            lines.append(f"{idx + 1}. Feature: {feature_name}")
+            lines.append(f"   ROAS: {item.get('avg_roas', 'N/A')}")
+            lines.append(f"   CTR: {item.get('avg_ctr', 'N/A')}")
+
+            # Add category information if available
+            if item.get("categories_ranked"):
+                top_cats = ", ".join(item.get("categories_ranked", [])[:3])
+                lines.append(f"   Top Categories: {top_cats}")
+
+            # Add location information if available
+            if item.get("locations_ranked"):
+                top_locs = ", ".join(item.get("locations_ranked", [])[:3])
+                lines.append(f"   Top Locations: {top_locs}")
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def get_attribution_data(self, query: str) -> AttributionData:
+        """Fetch and analyze attribution data for a specific query"""
+        print("Analyzing attribution data...")
+        start_time = time.time()
+
+        # Use direct data access instead of retrieval if we have cached data
+        campaign_metrics = []
+        channel_metrics = []
+        feature_metrics = []  # New variable for feature metrics
+
+        # If we have direct access to the data, use it
+        if self.attribution_campaign_data:
+            print(
+                f"Using {len(self.attribution_campaign_data)} cached campaign metrics"
+            )
+            campaign_metrics = self.attribution_campaign_data
         else:
-            # Deep research mode remains unchanged
-            report = await self.generate_report(query)
-            return {
-                "report": {
-                    "title": report.title,
-                    "sections": [
+            # Fallback to retrieval
+            campaign_docs = self._fast_retrieval(
+                query, top_k=20, types=["attribution_campaign"]
+            )
+            print(f"Retrieved {len(campaign_docs)} campaign docs")
+            # Extract raw data
+            for doc in campaign_docs:
+                if "raw_data" in doc.get("extra_info", {}):
+                    campaign_metrics.append(doc["extra_info"]["raw_data"])
+                elif doc_id := doc["extra_info"].get("id"):
+                    # Try to get from cache
+                    cache_entry = self.document_cache.get(f"campaign_{doc_id}")
+                    if cache_entry and "data" in cache_entry:
+                        campaign_metrics.append(cache_entry["data"])
+
+        # Use direct data for channels too
+        if self.attribution_channel_data:
+            print(f"Using {len(self.attribution_channel_data)} cached channel metrics")
+            channel_metrics = self.attribution_channel_data
+        else:
+            # Fallback to retrieval
+            channel_docs = self._fast_retrieval(
+                query, top_k=20, types=["attribution_channel"]
+            )
+            print(f"Retrieved {len(channel_docs)} channel docs")
+            # Extract raw data
+            for doc in channel_docs:
+                if "raw_data" in doc.get("extra_info", {}):
+                    channel_metrics.append(doc["extra_info"]["raw_data"])
+                elif doc_id := doc["extra_info"].get("id"):
+                    # Try to get from cache using the composite ID
+                    if "_" in doc_id:  # Ensure it's the composite ID
+                        cache_entry = self.document_cache.get(f"channel_{doc_id}")
+                        if cache_entry and "data" in cache_entry:
+                            channel_metrics.append(cache_entry["data"])
+
+        # Get feature metrics data - NEW SECTION
+        try:
+            print("Fetching feature metrics data for attribution analysis")
+            feature_metrics_result = (
+                self.supabase.table("feature_metrics_summary").select("*").execute()
+            )
+            feature_metrics = feature_metrics_result.data
+            print(f"Fetched {len(feature_metrics)} feature metrics records")
+        except Exception as e:
+            print(f"Error fetching feature metrics: {str(e)}")
+
+        # If we still don't have data, try direct database query as a last resort
+        if not campaign_metrics:
+            try:
+                print(
+                    "Attempting direct database query for campaign metrics as fallback"
+                )
+                campaign_metrics_result = (
+                    self.supabase.table("enhanced_ad_metrics_by_campaign")
+                    .select("*")
+                    .execute()
+                )
+                campaign_metrics = campaign_metrics_result.data
+                # Update our cache for future use
+                self.attribution_campaign_data = campaign_metrics
+                print(f"Direct query found {len(campaign_metrics)} campaign metrics")
+            except Exception as e:
+                print(f"Error in direct campaign metrics query: {str(e)}")
+
+        if not channel_metrics:
+            try:
+                print(
+                    "Attempting direct database query for channel metrics as fallback"
+                )
+                channel_metrics_result = (
+                    self.supabase.table("enhanced_ad_metrics_by_channel")
+                    .select("*")
+                    .execute()
+                )
+                channel_metrics = channel_metrics_result.data
+                # Update our cache for future use
+                self.attribution_channel_data = channel_metrics
+                print(f"Direct query found {len(channel_metrics)} channel metrics")
+            except Exception as e:
+                print(f"Error in direct channel metrics query: {str(e)}")
+
+        # Print data counts for debugging
+        print(
+            f"Final data counts: {len(campaign_metrics)} campaigns, {len(channel_metrics)} channels, {len(feature_metrics)} features"
+        )
+
+        # Sort and get top performers
+        top_campaigns = sorted(
+            [c for c in campaign_metrics if c.get("avg_roas") is not None],
+            key=lambda x: x.get("avg_roas", 0),
+            reverse=True,
+        )[:5]
+
+        top_channels = sorted(
+            [c for c in channel_metrics if c.get("avg_ctr") is not None],
+            key=lambda x: x.get("avg_ctr", 0),
+            reverse=True,
+        )[:5]
+
+        # Sort and get top performing features by ROAS - NEW SECTION
+        top_features = sorted(
+            [
+                f
+                for f in feature_metrics
+                if f.get("avg_roas") is not None and f.get("unique_feature")
+            ],
+            key=lambda x: x.get("avg_roas", 0),
+            reverse=True,
+        )[:8]  # Get more features to have a broader analysis
+
+        # Generate insights on feature categories and locations - NEW SECTION
+        feature_category_analysis = self._analyze_feature_categories(feature_metrics)
+        feature_location_analysis = self._analyze_feature_locations(feature_metrics)
+
+        # Generate attribution insights with Perplexity LLM
+        # Include feature performance data in the prompt
+        attribution_prompt = f"""Analyze this attribution data and provide specific insights:
+
+Campaign Data:
+{json.dumps(campaign_metrics[:10], indent=2)}
+
+Channel Data:
+{json.dumps(channel_metrics[:10], indent=2)}
+
+Feature Performance Data:
+{json.dumps(top_features, indent=2)}
+
+Key metrics to analyze:
+1. Campaign & Channel Performance:
+- Which campaigns and channels have the highest ROAS?
+- Which campaigns and channels have the highest conversion rates?
+- How do different channels compare on CPC and CPM?
+- What are the efficiency trends across campaigns?
+
+2. Visual Feature Performance:
+- Which specific visual features drive the highest performance?
+- In which categories do these features perform best?
+- In which geographic locations do these features perform best?
+- How do specific visual elements correlate with campaign performance?
+
+Format your analysis with specific numbers and actionable insights.
+Provide tactical recommendations based on both campaign/channel performance and visual feature effectiveness.
+"""
+
+        attribution_insights = "No attribution insights available."
+        try:
+            insights_response = self.perplexity_llm.complete(attribution_prompt)
+            attribution_insights = insights_response.text
+        except Exception as e:
+            print(f"Error generating attribution insights: {str(e)}")
+
+        print(
+            f"Attribution analysis completed in {time.time() - start_time:.2f} seconds"
+        )
+
+        return AttributionData(
+            campaign_metrics=campaign_metrics,
+            channel_metrics=channel_metrics,
+            top_performing_campaigns=top_campaigns,
+            top_performing_channels=top_channels,
+            top_performing_features=top_features,
+            feature_category_analysis=feature_category_analysis,
+            feature_location_analysis=feature_location_analysis,
+            attribution_insights=attribution_insights,
+        )
+
+    def _analyze_feature_categories(self, feature_metrics: List[Dict[str, Any]]) -> str:
+        """Analyze which categories perform best for different features"""
+        if not feature_metrics:
+            return "No feature category data available for analysis."
+
+        try:
+            # Create a mapping of categories to performance metrics
+            category_performance = defaultdict(list)
+            for feature in feature_metrics:
+                if not feature.get("categories_ranked") or not feature.get("avg_roas"):
+                    continue
+
+                # Only consider top 2 categories for each feature
+                top_categories = feature.get("categories_ranked", [])[:2]
+                roas = feature.get("avg_roas", 0)
+                ctr = feature.get("avg_ctr", 0)
+
+                for category in top_categories:
+                    category_performance[category].append(
                         {
-                            "title": section.title,
-                            "content": section.content,
-                            "sources": section.sources,
+                            "feature": feature.get("unique_feature", "Unknown"),
+                            "roas": roas,
+                            "ctr": ctr,
                         }
-                        for section in report.sections
-                    ],
-                    "summary": report.summary,
-                },
-                "type": "detailed_report",
-            }
+                    )
+
+            # Sort categories by average ROAS performance
+            sorted_categories = sorted(
+                [
+                    (cat, sum(f["roas"] for f in feats) / len(feats))
+                    for cat, feats in category_performance.items()
+                    if feats
+                ],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+
+            # Format the results
+            if not sorted_categories:
+                return "No clear patterns found in category performance."
+
+            lines = ["## Top Performing Categories by ROAS", ""]
+            for cat, avg_roas in sorted_categories[:5]:  # Top 5 categories
+                lines.append(f"### {cat}: Average ROAS {avg_roas:.2f}")
+                lines.append("Top performing features in this category:")
+
+                # Get features for this category
+                cat_features = category_performance[cat]
+                # Sort by ROAS
+                cat_features = sorted(
+                    cat_features, key=lambda x: x["roas"], reverse=True
+                )
+
+                for feat in cat_features[:3]:  # Top 3 features in each category
+                    lines.append(
+                        f"- {feat['feature']}: ROAS {feat['roas']:.2f}, CTR {feat['ctr']:.2%}"
+                    )
+                lines.append("")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            print(f"Error in feature category analysis: {str(e)}")
+            return "Unable to analyze feature categories due to an error."
+
+    def _analyze_feature_locations(self, feature_metrics: List[Dict[str, Any]]) -> str:
+        """Analyze which geographic locations perform best for different features"""
+        if not feature_metrics:
+            return "No feature location data available for analysis."
+
+        try:
+            # Create a mapping of locations to performance metrics
+            location_performance = defaultdict(list)
+            for feature in feature_metrics:
+                if not feature.get("locations_ranked") or not feature.get("avg_roas"):
+                    continue
+
+                # Only consider top 2 locations for each feature
+                top_locations = feature.get("locations_ranked", [])[:2]
+                roas = feature.get("avg_roas", 0)
+                ctr = feature.get("avg_ctr", 0)
+
+                for location in top_locations:
+                    location_performance[location].append(
+                        {
+                            "feature": feature.get("unique_feature", "Unknown"),
+                            "roas": roas,
+                            "ctr": ctr,
+                        }
+                    )
+
+            # Sort locations by average ROAS performance
+            sorted_locations = sorted(
+                [
+                    (loc, sum(f["roas"] for f in feats) / len(feats))
+                    for loc, feats in location_performance.items()
+                    if feats
+                ],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+
+            # Format the results
+            if not sorted_locations:
+                return "No clear patterns found in location performance."
+
+            lines = ["## Top Performing Locations by ROAS", ""]
+            for loc, avg_roas in sorted_locations[:5]:  # Top 5 locations
+                lines.append(f"### {loc}: Average ROAS {avg_roas:.2f}")
+                lines.append("Top performing features in this location:")
+
+                # Get features for this location
+                loc_features = location_performance[loc]
+                # Sort by ROAS
+                loc_features = sorted(
+                    loc_features, key=lambda x: x["roas"], reverse=True
+                )
+
+                for feat in loc_features[:3]:  # Top 3 features in each location
+                    lines.append(
+                        f"- {feat['feature']}: ROAS {feat['roas']:.2f}, CTR {feat['ctr']:.2%}"
+                    )
+                lines.append("")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            print(f"Error in feature location analysis: {str(e)}")
+            return "Unable to analyze feature locations due to an error."
 
     def _format_strategic_priorities(self) -> str:
         """Format strategic priorities from company context, handling optional fields"""
@@ -1305,6 +1998,178 @@ Return a valid JSON array containing these tasks. Do not include any explanation
             "size": len(self.document_cache),
             "docs": list(self.document_cache.keys())[:50],
         }
+
+    def stream_query(self, query: str, detail_level: int = 50):
+        """
+        Generator that streams the LLM output as SSE lines.
+        Each line is a JSON object with the same structure as the regular API response.
+        """
+        print(f"Starting stream_query for: {query[:50]}...")
+
+        # Initialize response data structure
+        response_data = {"response": "", "citations": [], "sources": []}
+
+        # Decide which model to use based on detail_level - KEEP THIS THE SAME
+        if detail_level < 50:
+            self.perplexity_llm.model = "sonar-pro"
+        else:
+            self.perplexity_llm.model = "sonar-reasoning-pro"
+            print(
+                "Using reasoning model for detailed analysis (will show chain-of-thought)"
+            )
+
+        # Choose a prompt template - KEEP THIS THE SAME
+        if detail_level < 50:
+            template = self.qa_templates["compact"]
+        elif detail_level < 85:
+            template = self.qa_templates["comprehensive"]
+        else:
+            template = self.qa_templates["comprehensive"]
+
+        # Step 1: Retrieve relevant chunks using the SAME logic as _fast_query_engine
+        max_chunks = 1  # Start with 1 chunk for lower detail levels
+        if detail_level > 60:
+            max_chunks = 2  # Use 2 chunks for medium detail
+        if detail_level > 80:
+            max_chunks = 3  # Use 3 chunks for high detail
+
+        retrieved_sources = []
+        context_text = ""
+
+        # Try using chunk-based retrieval first - SAME AS _fast_query_engine
+        try:
+            if len(self.topic_chunks) > 0:
+                print("Retrieving relevant ad campaigns and market research...")
+                chunks, sources = self._retrieve_relevant_chunks(
+                    query, max_chunks=max_chunks
+                )
+                retrieved_sources = sources
+
+                # Check if we got meaningful results
+                if not chunks or chunks[0].startswith(
+                    "No preprocessed chunks available"
+                ):
+                    raise ValueError("No relevant ad campaigns found in database")
+
+                # Step 2: Format context for the LLM - SAME AS _fast_query_engine
+                context_text = "\n\n".join(chunks)
+            else:
+                raise ValueError("Ad campaign database not initialized")
+        except Exception as e:
+            # Fall back to vector search if chunk retrieval fails - SAME AS _fast_query_engine
+            print(
+                f"Chunk retrieval failed: {str(e)}. Falling back to comprehensive search."
+            )
+            top_k = int(min(20 + (detail_level / 200) * 80, 100))  # Use fewer documents
+            print("Searching through complete ad and market research database...")
+            retrieved_sources = self._fast_retrieval(query, top_k)
+
+            # Format sources as context - SAME AS _fast_query_engine
+            chunks = [
+                "\n\n".join(
+                    [
+                        f"Campaign/Research Entry {i + 1} (Relevance: {source['score']:.2f}):\n{source['text']}"
+                        for i, source in enumerate(retrieved_sources[:top_k])
+                    ]
+                )
+            ]
+            context_text = "\n\n".join(chunks)
+
+        print(f"Retrieved {len(retrieved_sources)} sources for streaming query")
+        print(f"Retrieved context of length {len(context_text)} for streaming query")
+
+        # Update the response data with sources
+        response_data["sources"] = retrieved_sources
+
+        # Summarize context if it's too large - SAME AS _fast_query_engine
+        if len(context_text.split()) > 2000 and detail_level < 70:
+            # Truncate context for lower detail levels
+            context_text = "\n\n".join(chunks[:1])
+            print(
+                f"Focusing on most relevant {len(context_text.split())} words of campaign data"
+            )
+
+        # Generate prompt using the template and chunks - SAME AS _fast_query_engine
+        prompt = template.format(query_str=query, context_str=context_text)
+
+        # KEY DIFFERENCE: Instead of calling complete() here like _fast_query_engine,
+        # we use stream_complete() and yield the results
+
+        # Ensure we reset the last_citations before streaming
+        self.perplexity_llm.last_citations = []
+
+        # Since stream_complete returns a regular generator, we need to iterate over it normally
+        chunk_count = 0
+        try:
+            for chunk in self.perplexity_llm.stream_complete(prompt):
+                chunk_count += 1
+
+                # Debug info about the chunk
+                if chunk_count % 20 == 0:  # Print only periodically to avoid log spam
+                    print(
+                        f"Received chunk #{chunk_count}, delta length: {len(chunk.delta) if chunk.delta else 0}"
+                    )
+
+                # Check if the chunk has a delta (some might not due to API behavior)
+                text_piece = (
+                    chunk.delta if hasattr(chunk, "delta") and chunk.delta else ""
+                )
+
+                # Check for citations in this chunk (may be present in some chunks)
+                if hasattr(chunk, "citations") and chunk.citations:
+                    print(f"Found {len(chunk.citations)} citations in chunk")
+                    response_data["citations"] = chunk.citations
+
+                # Also check if perplexity_llm has updated its citations
+                if self.perplexity_llm.last_citations:
+                    print(
+                        f"Found {len(self.perplexity_llm.last_citations)} citations in LLM"
+                    )
+                    response_data["citations"] = self.perplexity_llm.last_citations
+
+                # Only update and send non-empty pieces
+                if text_piece:
+                    # Update the response text
+                    response_data["response"] += text_piece
+
+                    # Serialize to JSON and yield as SSE data
+                    json_data = json.dumps(response_data)
+                    yield f"data: {json_data}\n\n"
+
+            # After all chunks, explicitly check for citations from the LLM again
+            # This is important as citations might only be available after the streaming is complete
+            if hasattr(self.perplexity_llm, "get_last_citations"):
+                citations = self.perplexity_llm.get_last_citations()
+                if citations:
+                    print(f"Found {len(citations)} citations after streaming")
+                    response_data["citations"] = citations
+
+            # Generate suggested tasks based on the final response
+            # Only add to response if there are actual tasks
+            # suggested_tasks = self._generate_suggested_tasks(response_data["response"])
+            suggested_tasks = []
+            if suggested_tasks and len(suggested_tasks) > 0:
+                response_data["suggested_tasks"] = suggested_tasks
+
+            # Send final complete response with all accumulated data
+            final_json = json.dumps(response_data)
+            yield f"data: {final_json}\n\n"
+
+            print(
+                f"Completed stream_complete iteration, processed {chunk_count} chunks"
+            )
+
+        except Exception as e:
+            print(f"Error in stream_query: {e}")
+            # For debugging, also yield the error so we can see it in the stream
+            error_response = {"error": str(e), "response": response_data["response"]}
+            yield f"data: {json.dumps(error_response)}\n\n"
+            raise
+
+        finally:
+            # Always send a completion signal
+            print("Sending final [DONE] marker")
+            yield "data: [DONE]\n\n"
 
 
 # Create a global instance of KnowledgeBase
