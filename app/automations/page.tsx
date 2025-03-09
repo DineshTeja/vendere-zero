@@ -12,6 +12,8 @@ import {
   Scroll,
   Plus,
   ExternalLink,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -43,8 +45,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-// Type for the RPC function result
+// Update the type for original headlines
+type OriginalHeadline = {
+  text: string;
+  type: string;
+  visual_context: string;
+};
+
+// Update the RPC function result type
 type AdVariantItem = {
   mr_id: string;
   mr_user_id: string;
@@ -63,7 +80,7 @@ type AdVariantItem = {
     intent_reflected: string;
     likelihood_score: number;
   }[];
-  mr_original_headlines: Record<string, unknown>[];
+  mr_original_headlines: OriginalHeadline[];
   mr_new_headlines: Record<string, unknown>[];
   li_id: string;
   li_type: string;
@@ -145,6 +162,7 @@ const AdImage = ({
   alt = "Ad image",
   isSelected = false,
   onClick,
+  preserveAspectRatio = false,
 }: {
   src?: string;
   className?: string;
@@ -152,6 +170,7 @@ const AdImage = ({
   alt?: string;
   isSelected?: boolean;
   onClick?: () => void;
+  preserveAspectRatio?: boolean;
 }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -217,7 +236,9 @@ const AdImage = ({
         style={
           size
             ? { width: size, height: size }
-            : { aspectRatio: "1/1", width: "100%" }
+            : preserveAspectRatio
+            ? { aspectRatio: "1/1", width: "100%" }
+            : { width: "100%", minHeight: "400px" }
         }
         onClick={onClick}
       >
@@ -241,7 +262,9 @@ const AdImage = ({
       style={
         size
           ? { width: size, height: size }
-          : { aspectRatio: "1/1", width: "100%" }
+          : preserveAspectRatio
+          ? { aspectRatio: "1/1", width: "100%" }
+          : { width: "100%", minHeight: "400px" }
       }
       onClick={onClick}
     >
@@ -254,13 +277,42 @@ const AdImage = ({
         src={imageUrl}
         alt={alt}
         fill
-        className="object-cover"
+        className={preserveAspectRatio ? "object-cover" : "object-contain"}
         onError={handleImageError}
         onLoadingComplete={() => setIsLoading(false)}
         unoptimized
       />
     </div>
   );
+};
+
+// Update the headline variants type
+type HeadlineVariant = {
+  id: string;
+  image_url: string;
+  rules_used: Array<{
+    type: string;
+    name: string;
+    description: string;
+    value: string | number | boolean | string[] | Record<string, unknown>;
+  }>;
+  original_headlines: Array<{
+    text: string;
+    type: string;
+    visual_context: string;
+  }>;
+  new_headlines: Array<{
+    text: string;
+    type: string;
+    visual_context: string;
+    original: string;
+    improvements: string[];
+    expected_impact: string[];
+    target_audience: string[];
+    pain_points_addressed: string[];
+  }>;
+  created_at: string;
+  updated_at: string;
 };
 
 export default function Automations() {
@@ -314,6 +366,28 @@ export default function Automations() {
   const [selectedRules, setSelectedRules] = useState<{
     [key: string]: boolean;
   }>({});
+
+  // Update the state definition
+  const [headlineVariants, setHeadlineVariants] = useState<HeadlineVariant[]>(
+    []
+  );
+
+  // Add state for variant count and generation progress
+  const [variantCount, setVariantCount] = useState(3);
+  const [generatingVariants, setGeneratingVariants] = useState(false);
+  const [generatedCount, setGeneratedCount] = useState(0);
+
+  // Add state for selected variant
+  const [selectedVariant, setSelectedVariant] =
+    useState<HeadlineVariant | null>(null);
+
+  // Add state for current headline index
+  const [currentHeadlineIndex, setCurrentHeadlineIndex] = useState(0);
+
+  // Reset current headline index when selected variant changes
+  useEffect(() => {
+    setCurrentHeadlineIndex(0);
+  }, [selectedVariant]);
 
   // Initialize selected rules when dialog opens
   useEffect(() => {
@@ -442,6 +516,55 @@ export default function Automations() {
       .subscribe();
 
     // Cleanup subscription
+    return () => {
+      channel.unsubscribe();
+    };
+  }, []);
+
+  // Update the subscription handler
+  useEffect(() => {
+    const channel = supabase.channel("headline_variants_changes");
+
+    channel
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "headline_variants",
+        },
+        (payload) => {
+          console.log("Headline variant change received!", payload);
+          if (payload.eventType === "INSERT") {
+            setHeadlineVariants((prev) => [
+              ...prev,
+              payload.new as HeadlineVariant,
+            ]);
+          } else if (payload.eventType === "DELETE") {
+            setHeadlineVariants((prev) =>
+              prev.filter((variant) => variant.id !== payload.old.id)
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    // Initial fetch of headline variants
+    const fetchHeadlineVariants = async () => {
+      const { data, error } = await supabase
+        .from("headline_variants")
+        .select("*");
+
+      if (error) {
+        console.error("Error fetching headline variants:", error);
+        return;
+      }
+
+      setHeadlineVariants(data);
+    };
+
+    fetchHeadlineVariants();
+
     return () => {
       channel.unsubscribe();
     };
@@ -794,6 +917,7 @@ export default function Automations() {
                                   className="w-full"
                                   isSelected={selectedAdIndex === index}
                                   onClick={() => setSelectedAdIndex(index)}
+                                  preserveAspectRatio={true}
                                 />
                               </div>
                             </div>
@@ -827,27 +951,400 @@ export default function Automations() {
                     <ScrollArea className="h-full">
                       {selectedAd ? (
                         <div className="space-y-8">
-                          {/* Ad Preview Section */}
-                          <div className="space-y-6">
-                            <div className="flex items-start gap-6">
-                              <AdImage
-                                src={selectedAd.mr_image_url}
-                                alt={selectedAd.li_name || "Ad preview"}
-                                size={200}
-                                className="shrink-0"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <h2 className="text-xl font-semibold truncate mb-2">
-                                  {selectedAd.li_name}
-                                </h2>
-                                {selectedAd.li_description && (
-                                  <p className="text-sm text-muted-foreground">
-                                    {selectedAd.li_description}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
+                          {/* Ad Preview */}
+                          <div className="space-y-4">
+                            <h3 className="text-sm font-medium">Ad Preview</h3>
+                            <AdImage
+                              src={selectedAd.mr_image_url}
+                              alt="Ad preview"
+                              className="w-full max-h-[400px]"
+                              preserveAspectRatio={false}
+                            />
                           </div>
+
+                          {/* Generated Variants Section */}
+                          {headlineVariants.filter(
+                            (variant) =>
+                              variant.image_url === selectedAd.mr_image_url
+                          ).length > 0 && (
+                            <div className="space-y-4">
+                              <h3 className="text-sm font-medium">
+                                Generated Variants
+                              </h3>
+
+                              {/* Table View */}
+                              <Card>
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="w-[100px]">
+                                        Variant
+                                      </TableHead>
+                                      {headlineVariants
+                                        .filter(
+                                          (variant) =>
+                                            variant.image_url ===
+                                            selectedAd.mr_image_url
+                                        )
+                                        .slice(0, 1)
+                                        .map((firstVariant) =>
+                                          firstVariant.original_headlines.map(
+                                            (_, index) => (
+                                              <TableHead key={index}>
+                                                Headline {index + 1}
+                                              </TableHead>
+                                            )
+                                          )
+                                        )}
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {/* Original Headlines Row */}
+                                    {headlineVariants
+                                      .filter(
+                                        (variant) =>
+                                          variant.image_url ===
+                                          selectedAd.mr_image_url
+                                      )
+                                      .slice(0, 1)
+                                      .map((firstVariant) => (
+                                        <TableRow key="original">
+                                          <TableCell className="font-medium">
+                                            Original
+                                          </TableCell>
+                                          {firstVariant.original_headlines.map(
+                                            (headline, index) => (
+                                              <TableCell key={index}>
+                                                <div className="space-y-1">
+                                                  <p>{headline.text}</p>
+                                                  <span className="text-xs text-muted-foreground">
+                                                    {headline.type}
+                                                  </span>
+                                                </div>
+                                              </TableCell>
+                                            )
+                                          )}
+                                        </TableRow>
+                                      ))}
+
+                                    {/* Variant Rows */}
+                                    {headlineVariants
+                                      .filter(
+                                        (variant) =>
+                                          variant.image_url ===
+                                          selectedAd.mr_image_url
+                                      )
+                                      .map((variant, variantIndex) => (
+                                        <TableRow
+                                          key={variant.id}
+                                          className="cursor-pointer hover:bg-muted/50"
+                                          onClick={() =>
+                                            setSelectedVariant(variant)
+                                          }
+                                        >
+                                          <TableCell className="font-medium">
+                                            Variant {variantIndex + 1}
+                                          </TableCell>
+                                          {variant.new_headlines.map(
+                                            (headline, index) => (
+                                              <TableCell key={index}>
+                                                <div className="space-y-1">
+                                                  <p>{headline.text}</p>
+                                                  <span className="text-xs text-muted-foreground">
+                                                    {headline.type}
+                                                  </span>
+                                                </div>
+                                              </TableCell>
+                                            )
+                                          )}
+                                        </TableRow>
+                                      ))}
+                                  </TableBody>
+                                </Table>
+                              </Card>
+
+                              {/* Variant Details Dialog */}
+                              <Dialog
+                                open={!!selectedVariant}
+                                onOpenChange={(open) =>
+                                  !open && setSelectedVariant(null)
+                                }
+                              >
+                                <DialogContent className="max-w-4xl max-h-[90dvh] flex flex-col overflow-hidden p-0">
+                                  <DialogHeader className="px-6 py-4 border-b bg-background">
+                                    <DialogTitle>Variant Details</DialogTitle>
+                                    <DialogDescription>
+                                      Detailed information about the selected
+                                      headline variant
+                                    </DialogDescription>
+                                  </DialogHeader>
+
+                                  <div className="flex-1 overflow-y-auto">
+                                    <div className="px-6 py-6">
+                                      {selectedVariant && (
+                                        <div className="space-y-8">
+                                          {/* Ad Preview */}
+                                          <div className="space-y-4">
+                                            <h3 className="text-sm font-medium">
+                                              Ad Preview
+                                            </h3>
+                                            <AdImage
+                                              src={selectedVariant.image_url}
+                                              alt="Ad preview"
+                                              className="w-full max-h-[400px]"
+                                              preserveAspectRatio={false}
+                                            />
+                                          </div>
+
+                                          {/* Headlines Comparison with Pagination */}
+                                          <div className="space-y-4">
+                                            <div className="flex items-center justify-between">
+                                              <h3 className="text-sm font-medium">
+                                                Headlines Comparison
+                                              </h3>
+                                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                <span>
+                                                  {currentHeadlineIndex + 1} of{" "}
+                                                  {
+                                                    selectedVariant
+                                                      .new_headlines.length
+                                                  }
+                                                </span>
+                                                <div className="flex items-center gap-1">
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8"
+                                                    disabled={
+                                                      currentHeadlineIndex === 0
+                                                    }
+                                                    onClick={() =>
+                                                      setCurrentHeadlineIndex(
+                                                        (prev) => prev - 1
+                                                      )
+                                                    }
+                                                  >
+                                                    <ChevronLeft className="h-4 w-4" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8"
+                                                    disabled={
+                                                      currentHeadlineIndex ===
+                                                      selectedVariant
+                                                        .new_headlines.length -
+                                                        1
+                                                    }
+                                                    onClick={() =>
+                                                      setCurrentHeadlineIndex(
+                                                        (prev) => prev + 1
+                                                      )
+                                                    }
+                                                  >
+                                                    <ChevronRight className="h-4 w-4" />
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            </div>
+
+                                            {/* Current Headline Card */}
+                                            <Card className="p-4">
+                                              <div className="space-y-4">
+                                                <div className="grid grid-cols-2 gap-4">
+                                                  <div>
+                                                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                                      Original Headline
+                                                    </h4>
+                                                    <div className="p-3 rounded-md bg-muted/50">
+                                                      <p className="text-sm">
+                                                        {
+                                                          selectedVariant
+                                                            .new_headlines[
+                                                            currentHeadlineIndex
+                                                          ].original
+                                                        }
+                                                      </p>
+                                                      <span className="text-xs text-muted-foreground mt-1 block">
+                                                        {
+                                                          selectedVariant
+                                                            .original_headlines[
+                                                            currentHeadlineIndex
+                                                          ]?.type
+                                                        }
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  <div>
+                                                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                                      New Headline
+                                                    </h4>
+                                                    <div className="p-3 rounded-md bg-primary/5 border-primary/10 border">
+                                                      <p className="text-sm">
+                                                        {
+                                                          selectedVariant
+                                                            .new_headlines[
+                                                            currentHeadlineIndex
+                                                          ].text
+                                                        }
+                                                      </p>
+                                                      <span className="text-xs text-muted-foreground mt-1 block">
+                                                        {
+                                                          selectedVariant
+                                                            .new_headlines[
+                                                            currentHeadlineIndex
+                                                          ].type
+                                                        }
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-4 pt-4">
+                                                  <div className="space-y-3">
+                                                    <div>
+                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                                        Improvements
+                                                      </h4>
+                                                      <ul className="list-disc list-inside space-y-1">
+                                                        {selectedVariant.new_headlines[
+                                                          currentHeadlineIndex
+                                                        ].improvements.map(
+                                                          (improvement, i) => (
+                                                            <li
+                                                              key={i}
+                                                              className="text-sm"
+                                                            >
+                                                              {improvement}
+                                                            </li>
+                                                          )
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                    <div>
+                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                                        Expected Impact
+                                                      </h4>
+                                                      <ul className="list-disc list-inside space-y-1">
+                                                        {selectedVariant.new_headlines[
+                                                          currentHeadlineIndex
+                                                        ].expected_impact.map(
+                                                          (impact, i) => (
+                                                            <li
+                                                              key={i}
+                                                              className="text-sm"
+                                                            >
+                                                              {impact}
+                                                            </li>
+                                                          )
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                  </div>
+                                                  <div className="space-y-3">
+                                                    <div>
+                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                                        Target Audience
+                                                      </h4>
+                                                      <ul className="list-disc list-inside space-y-1">
+                                                        {selectedVariant.new_headlines[
+                                                          currentHeadlineIndex
+                                                        ].target_audience.map(
+                                                          (audience, i) => (
+                                                            <li
+                                                              key={i}
+                                                              className="text-sm"
+                                                            >
+                                                              {audience}
+                                                            </li>
+                                                          )
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                    <div>
+                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                                        Pain Points Addressed
+                                                      </h4>
+                                                      <ul className="list-disc list-inside space-y-1">
+                                                        {selectedVariant.new_headlines[
+                                                          currentHeadlineIndex
+                                                        ].pain_points_addressed.map(
+                                                          (point, i) => (
+                                                            <li
+                                                              key={i}
+                                                              className="text-sm"
+                                                            >
+                                                              {point}
+                                                            </li>
+                                                          )
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </Card>
+                                          </div>
+
+                                          {/* Rules Used Section */}
+                                          <div className="space-y-4">
+                                            <div className="sticky top-0 bg-background pt-4 pb-2 -mx-6 px-6 border-b z-10">
+                                              <h3 className="text-sm font-medium">
+                                                Rules Applied
+                                              </h3>
+                                            </div>
+                                            <div className="grid grid-cols-4 gap-3">
+                                              {selectedVariant.rules_used.map(
+                                                (rule, index) => (
+                                                  <Card
+                                                    key={index}
+                                                    className="p-3"
+                                                  >
+                                                    <div className="space-y-2">
+                                                      <div className="flex items-center justify-between gap-2">
+                                                        <h4 className="text-sm font-medium">
+                                                          {rule.name}
+                                                        </h4>
+                                                        <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs">
+                                                          {rule.type}
+                                                        </span>
+                                                      </div>
+                                                      <p className="text-xs text-muted-foreground">
+                                                        {rule.description}
+                                                      </p>
+                                                    </div>
+                                                  </Card>
+                                                )
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="px-6 py-4 border-t bg-background mt-auto">
+                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                      <span>
+                                        Created:{" "}
+                                        {selectedVariant &&
+                                          new Date(
+                                            selectedVariant.created_at
+                                          ).toLocaleString()}
+                                      </span>
+                                      <span>
+                                        Last Updated:{" "}
+                                        {selectedVariant &&
+                                          new Date(
+                                            selectedVariant.updated_at
+                                          ).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </div>
+                          )}
 
                           {/* Automation Actions */}
                           <div className="space-y-4">
@@ -1488,6 +1985,25 @@ export default function Automations() {
           </DialogHeader>
           <ScrollArea className="flex-1 pr-4">
             <div className="space-y-6 py-4">
+              {/* Add variant count input */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="variant-count">Number of Variants</Label>
+                  <Input
+                    id="variant-count"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={variantCount}
+                    onChange={(e) =>
+                      setVariantCount(parseInt(e.target.value) || 1)
+                    }
+                    className="w-24"
+                  />
+                </div>
+              </div>
+
+              {/* Existing rule selection content */}
               {isLoadingRules ? (
                 <div className="flex justify-center items-center py-8">
                   <div className="flex flex-col items-center gap-2">
@@ -1620,9 +2136,7 @@ export default function Automations() {
                         >
                           {material.content_rules.every(
                             (_, index) =>
-                              selectedRules[
-                                `material-${material.id}-${index}`
-                              ] ?? true
+                              selectedRules[`material-${material.id}-${index}`]
                           )
                             ? "Deselect All"
                             : "Select All"}
@@ -1681,13 +2195,147 @@ export default function Automations() {
               Cancel
             </Button>
             <Button
-              onClick={() => {
-                // TODO: Handle variant generation with selected rules
+              onClick={async () => {
+                // Get selected rules
+                const selectedRulesList = [
+                  ...customRules.filter(
+                    (rule) => selectedRules[`custom-${rule.id}`] ?? true
+                  ),
+                  ...brandMaterials.flatMap((material) =>
+                    material.content_rules.filter(
+                      (_, index) =>
+                        selectedRules[`material-${material.id}-${index}`]
+                    )
+                  ),
+                ];
+
                 setIsRuleSelectionOpen(false);
-                toast.success("Starting variant generation...");
+                setGeneratingVariants(true);
+                setGeneratedCount(0);
+
+                // Create array of promises for each variant
+                const generatePromises = Array(variantCount)
+                  .fill(null)
+                  .map(() =>
+                    fetch("/api/generate-headline-variants", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        imageUrl: selectedAd?.mr_image_url,
+                        contentRules: selectedRulesList,
+                      }),
+                    }).then(async (response) => {
+                      const data = await response.json();
+                      if (!response.ok) {
+                        // Handle specific error cases
+                        if (response.status === 400) {
+                          if (
+                            data.error === "No headlines found in the image"
+                          ) {
+                            throw new Error(
+                              "No headlines could be detected in this ad image"
+                            );
+                          }
+                          if (data.error === "Image URL is required") {
+                            throw new Error("Please select an ad first");
+                          }
+                        }
+                        throw new Error(
+                          data.error || "Failed to generate variant"
+                        );
+                      }
+                      setGeneratedCount((prev) => prev + 1);
+                      return data;
+                    })
+                  );
+
+                // Show progress toast
+                toast.promise(Promise.all(generatePromises), {
+                  loading: (
+                    <div className="flex items-start gap-4">
+                      <AdImage
+                        src={selectedAd?.mr_image_url}
+                        alt="Ad preview"
+                        size={40}
+                        className="rounded-sm"
+                      />
+                      <div className="space-y-2">
+                        <h3 className="font-medium">
+                          Generating Headline Variants
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          Generated {generatedCount} of {variantCount}
+                          variants...
+                        </p>
+                        <div className="w-full bg-muted rounded-full h-1.5 mt-1">
+                          <div
+                            className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                            style={{
+                              width: `${
+                                (generatedCount / variantCount) * 100
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ),
+                  success: () => {
+                    setGeneratingVariants(false);
+                    return (
+                      <div className="flex items-start gap-4">
+                        <AdImage
+                          src={selectedAd?.mr_image_url}
+                          alt="Ad preview"
+                          size={40}
+                          className="rounded-sm"
+                        />
+                        <div className="space-y-1">
+                          <h3 className="font-medium">
+                            Variants Generated Successfully
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            {variantCount} variants created based on{" "}
+                            {selectedRulesList.length} rules
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  },
+                  error: (err) => {
+                    setGeneratingVariants(false);
+                    const errorMessage =
+                      err instanceof Error
+                        ? err.message
+                        : "An unexpected error occurred";
+
+                    // Show a separate error toast with the message
+                    toast.error(errorMessage, {
+                      description:
+                        err instanceof Error &&
+                        err.message ===
+                          "No headlines could be detected in this ad image"
+                          ? "Try selecting a different ad or ensure the image contains visible text."
+                          : undefined,
+                    });
+
+                    // Return null to prevent duplicate toast
+                    return null;
+                  },
+                });
               }}
+              disabled={generatingVariants}
             >
-              Generate Variants
+              {generatingVariants ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                "Generate Variants"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

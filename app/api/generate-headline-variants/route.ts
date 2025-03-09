@@ -129,9 +129,12 @@ async function extractHeadlines(imageUrl: string) {
     model: "gpt-4o-mini",
     messages: [
       {
-        role: "system",
-        content:
-          `You are an expert at analyzing ad headlines and their visual context. Your task is to identify and extract headlines from the provided ad image URL.
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              `You are an expert at analyzing ad headlines and their visual context. Your task is to identify and extract headlines from the provided ad image URL.
 
 For each headline found, provide:
 1. The exact text of the headline
@@ -139,8 +142,15 @@ For each headline found, provide:
 3. A description of its visual context (where it appears, styling, etc.)
 
 Focus on headlines that are prominent and serve a clear purpose in the ad.
-
-Image URL to analyze: ${imageUrl}`,
+If no headlines are found in the image, return an empty list.`,
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: imageUrl,
+            },
+          },
+        ],
       },
     ],
     response_format: zodResponseFormat(headlineExtractionSchema, "headlines"),
@@ -168,21 +178,23 @@ async function generateHeadlineVariants(
       {
         role: "system",
         content:
-          `You are an expert at generating optimized ad headlines. Your task is to create variants of the provided headlines while considering:
-1. The original headlines and their context
+          `You are an expert at generating optimized ad headlines. Your task is to create ONE optimized variant for each provided headline while considering:
+1. The original headline and its context
 2. The ad's market research data and target audience
 3. The provided content rules and guidelines
 
-For each variant:
-- Maintain the original's intent while improving its effectiveness
+For each headline variant:
+- Create exactly one optimized version that maintains the original's intent while improving its effectiveness
 - Consider the visual context and placement
 - Explain improvements and expected impact
 - Align with target audience and address pain points
-- Follow all provided content rules`,
+- Follow all provided content rules
+
+Important: Generate exactly ONE variant for each original headline. Do not generate multiple variants per headline.`,
       },
       {
         role: "user",
-        content: `Generate optimized variants for these headlines:
+        content: `Generate one optimized variant for each of these headlines:
 
 Original Headlines:
 ${JSON.stringify(originalHeadlines, null, 2)}
@@ -206,7 +218,7 @@ ${
 Content Rules to Follow:
 ${JSON.stringify(contentRules, null, 2)}
 
-Generate 2-3 variants for each headline that follow the content rules and leverage the market research data.`,
+Generate exactly one variant for each headline that follows the content rules and leverages the market research data.`,
       },
     ],
     response_format: zodResponseFormat(headlineVariantsSchema, "variants"),
@@ -247,6 +259,15 @@ export async function POST(request: Request) {
       "Extracted headlines:",
       JSON.stringify(extractedHeadlines, null, 2),
     );
+
+    // Check if any headlines were found
+    if (extractedHeadlines.length === 0) {
+      console.log("No headlines found in the image");
+      return NextResponse.json(
+        { error: "No headlines found in the image" },
+        { status: 400 },
+      );
+    }
 
     // 2. Get ad data from Supabase
     console.log("Step 2: Fetching ad data from Supabase...");
