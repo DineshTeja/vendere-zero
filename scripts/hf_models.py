@@ -3,7 +3,7 @@ from io import BytesIO
 from typing import TypedDict, List
 
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont  # type: ignore[import-untyped]
 from transformers import AutoProcessor, AutoModelForCausalLM  # type: ignore[import-untyped]
 
 
@@ -33,14 +33,44 @@ def load_florence_model() -> tuple[AutoModelForCausalLM, AutoProcessor]:
     return model, processor
 
 
+def get_image_from_url(url: str) -> Image.Image:
+    """Get image from URL and convert to RGB format.
+
+    Args:
+        url: URL of the image
+
+    Returns:
+        PIL Image in RGB format
+    """
+    response = requests.get(url)
+    image = Image.open(BytesIO(response.content))
+    # Convert to RGB if image is in a different mode (e.g., RGBA, L)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    return image
+
+
 def florence_model(image: Image.Image) -> dict:
+    """Process image with Florence model for OCR.
+
+    Args:
+        image: PIL Image in RGB format
+
+    Returns:
+        Dictionary containing OCR results
+    """
     model, processor = load_florence_model()
+
+    # Ensure image is in RGB mode
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
     prompt = "<OCR_WITH_REGION>"
     inputs = processor(text=prompt, images=image, return_tensors="pt")
     generated_ids = model.generate(
         input_ids=inputs["input_ids"],
         pixel_values=inputs["pixel_values"],
-        max_new_tokens=1024,  # Increased from 100 to 1024 for more comprehensive output
+        max_new_tokens=1024,
         num_beams=3,
     )
     generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
@@ -48,12 +78,6 @@ def florence_model(image: Image.Image) -> dict:
         generated_text, task=prompt, image_size=(image.width, image.height)
     )
     return parsed_answer
-
-
-def get_image_from_url(url: str) -> Image.Image:
-    response = requests.get(url)
-    image = Image.open(BytesIO(response.content))
-    return image
 
 
 def parse_florence_result(result: dict) -> List[TextRegion]:
@@ -121,11 +145,75 @@ def parse_florence_result(result: dict) -> List[TextRegion]:
     return text_regions
 
 
+def draw_bounding_boxes(
+    image: Image.Image, text_regions: List[TextRegion]
+) -> Image.Image:
+    """Draw bounding boxes and labels on the image.
+
+    Args:
+        image: PIL Image to draw on
+        text_regions: List of TextRegion objects with bounding boxes and text
+
+    Returns:
+        PIL Image with bounding boxes and labels drawn
+    """
+    # Create a copy of the image to draw on
+    draw_image = image.copy()
+    draw = ImageDraw.Draw(draw_image)
+
+    # Print image dimensions
+    print(f"Image dimensions: {draw_image.width}x{draw_image.height}")
+
+    # Try to load a font, fall back to default if not available
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 12)
+    except IOError:
+        font = ImageFont.load_default()
+
+    # Colors for visualization
+    box_color = (255, 0, 0)  # Red for boxes
+    text_bg_color = (255, 255, 255)  # White background for text
+    text_color = (255, 0, 0)  # Red text
+
+    for region in text_regions:
+        box = region["bounding_box"]
+
+        # Draw the bounding box
+        points = [
+            box["top_left"],
+            box["top_right"],
+            box["bottom_right"],
+            box["bottom_left"],
+            box["top_left"],  # Close the polygon
+        ]
+        draw.line(points, fill=box_color, width=2)
+
+        # Draw text above the box
+        text = region["text"]
+        text_x = box["top_left"][0]
+        text_y = box["top_left"][1] - 20  # Position text above the box
+
+        # Draw text background
+        text_bbox = draw.textbbox((text_x, text_y), text, font=font)
+        draw.rectangle(text_bbox, fill=text_bg_color)
+
+        # Draw text
+        draw.text((text_x, text_y), text, fill=text_color, font=font)
+
+    return draw_image
+
+
 if __name__ == "__main__":
-    image_url = "https://tpc.googlesyndication.com/simgad/749086828097034900"
+    image_url = "https://tpc.googlesyndication.com/simgad/10725161807350920379"
     image = get_image_from_url(image_url)
     model_result = florence_model(image)
     parsed_result = parse_florence_result(model_result)
+
+    # Draw bounding boxes on the image
+    annotated_image = draw_bounding_boxes(image, parsed_result)
+
+    # Show the annotated image in a window
+    annotated_image.show()
 
     # Print results in a readable format
     print("\nDetected Text Regions:")

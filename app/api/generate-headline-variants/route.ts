@@ -34,6 +34,42 @@ const headlineExtractionSchema = z.object({
   headlines: headlineExtractionSchemaArray,
 });
 
+const extractedHeadlineWithLocationSchema = z.object({
+  text: z.string().describe("The actual headline text"),
+  type: z.string().describe(
+    "The type of headline (e.g., 'tagline', 'cta', 'title')",
+  ),
+  bounding_box: z.object({
+    top_left: z.array(z.number()).describe(
+      "The top left coordinates of the bounding box",
+    ),
+    top_right: z.array(z.number()).describe(
+      "The top right coordinates of the bounding box",
+    ),
+    bottom_right: z.array(z.number()).describe(
+      "The bottom right coordinates of the bounding box",
+    ),
+    bottom_left: z.array(z.number()).describe(
+      "The bottom left coordinates of the bounding box",
+    ),
+    center: z.array(z.number()).describe(
+      "The center coordinates of the bounding box",
+    ),
+    width: z.number().describe("The width of the bounding box"),
+    height: z.number().describe("The height of the bounding box"),
+  }),
+  area: z.number().describe("The area of the bounding box"),
+  aspect_ratio: z.number().describe("The aspect ratio of the bounding box"),
+});
+
+const extractedHeadlinesWithLocationSchemaArray = z.array(
+  extractedHeadlineWithLocationSchema,
+).describe("List of headlines found in the image with their locations");
+
+const extractedHeadlinesWithLocationSchema = z.object({
+  headlines: extractedHeadlinesWithLocationSchemaArray,
+});
+
 // Define the schema for content rules
 export const contentRuleSchema = z.object({
   type: z.string().describe(
@@ -56,6 +92,29 @@ export const contentRuleSchema = z.object({
 // Define the schema for headline variants
 const headlineVariantSchema = z.object({
   text: z.string().describe("The new headline text"),
+
+  bounding_box: z.object({
+    top_left: z.array(z.number()).describe(
+      "The top left coordinates of the bounding box",
+    ),
+    top_right: z.array(z.number()).describe(
+      "The top right coordinates of the bounding box",
+    ),
+    bottom_right: z.array(z.number()).describe(
+      "The bottom right coordinates of the bounding box",
+    ),
+    bottom_left: z.array(z.number()).describe(
+      "The bottom left coordinates of the bounding box",
+    ),
+    center: z.array(z.number()).describe(
+      "The center coordinates of the bounding box",
+    ),
+    width: z.number().describe("The width of the bounding box"),
+    height: z.number().describe("The height of the bounding box"),
+  }),
+  area: z.number().describe("The area of the bounding box"),
+  aspect_ratio: z.number().describe("The aspect ratio of the bounding box"),
+
   type: z.string().describe(
     "The type of headline (e.g., 'tagline', 'cta', 'title')",
   ),
@@ -121,54 +180,154 @@ type AdVariantItem = {
   li_preview_url: string;
 };
 
+type FlorenceOCRResult = {
+  text: string;
+  bounding_box: {
+    top_left: [number, number];
+    top_right: [number, number];
+    bottom_right: [number, number];
+    bottom_left: [number, number];
+    center: [number, number];
+    width: number;
+    height: number;
+  };
+  area: number;
+  aspect_ratio: number;
+};
+
 // Hardcoded user ID for development
 const HARDCODED_USER_ID = "97d82337-5d25-4258-b47f-5be8ea53114c";
 
-async function extractHeadlines(imageUrl: string) {
+async function extractHeadlines(
+  imageUrl: string,
+): Promise<z.infer<typeof extractedHeadlinesWithLocationSchema>> {
+  async function extractHeadlinesWithGPT(
+    imageUrl: string,
+  ): Promise<z.infer<typeof headlineExtractionSchemaArray>> {
+    console.log("Extracting headlines with GPT...");
+    const response = await openai.beta.chat.completions.parse({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                `You are an expert at analyzing ad headlines and their visual context. Your task is to identify and extract headlines from the provided ad image URL.
+  
+  For each headline found, provide:
+  1. The exact text of the headline
+  2. The type of headline (e.g., tagline, call-to-action, title)
+  3. A description of its visual context (where it appears, styling, etc.)
+  
+  Focus on headlines that are prominent and serve a clear purpose in the ad.
+  If no headlines are found in the image, return an empty list.`,
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: imageUrl,
+              },
+            },
+          ],
+        },
+      ],
+      response_format: zodResponseFormat(headlineExtractionSchema, "headlines"),
+      temperature: 0.3,
+    });
+
+    const headlines = response.choices[0].message.parsed?.headlines;
+    if (!headlines) {
+      throw new Error("No headlines in response");
+    }
+
+    return headlines as z.infer<typeof headlineExtractionSchemaArray>;
+  }
+
+  async function extractHeadlinesWithFlorence(
+    imageUrl: string,
+  ): Promise<FlorenceOCRResult[]> {
+    console.log("Extracting headlines with Florence...");
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/ocr/detect`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ image_url: imageUrl }),
+        },
+      );
+      const data = await response.json();
+      return data as FlorenceOCRResult[];
+    } catch (error) {
+      console.error("Error extracting headlines with Florence:", error);
+      throw error;
+    }
+  }
+
+  const [gptHeadlines, florenceHeadlines] = await Promise.all([
+    extractHeadlinesWithGPT(imageUrl),
+    extractHeadlinesWithFlorence(imageUrl),
+  ]);
+
+  console.log("GPT Headlines:", gptHeadlines);
+  console.log("Florence Headlines:", florenceHeadlines);
+
   const response = await openai.beta.chat.completions.parse({
     model: "gpt-4o-mini",
     messages: [
       {
+        role: "system",
+        content:
+          `You are an expert at analyzing and reconciling text extracted from images using different methods. Your task is to compare and merge text extracted by GPT (which is generally more accurate in text content) with text extracted by Florence OCR (which provides precise bounding boxes but may have text accuracy or segmentation issues).
+
+Rules for reconciliation:
+1. Use GPT's text as the primary source of truth for the actual text content
+2. Use Florence's bounding boxes when there's a clear match between GPT and Florence text
+3. For cases where Florence has split a single text block into multiple segments:
+   - Identify segments that should be merged based on GPT's output
+   - Combine the bounding boxes by:
+     * Using the leftmost coordinates for left bounds
+     * Using the rightmost coordinates for right bounds
+     * Using the topmost coordinates for top bounds
+     * Using the bottommost coordinates for bottom bounds
+4. Discard any text regions that appear in only one of the sources (must be present in both)
+5. If Florence's text is slightly inaccurate but clearly corresponds to GPT's text (based on position and partial match), use GPT's text with Florence's bounding box
+
+Your output should maintain only the text entries that have both accurate text (from GPT) and valid bounding boxes (from Florence, merged if necessary).`,
+      },
+      {
         role: "user",
-        content: [
-          {
-            type: "text",
-            text:
-              `You are an expert at analyzing ad headlines and their visual context. Your task is to identify and extract headlines from the provided ad image URL.
+        content: `GPT Extracted Text:
+${gptHeadlines.join("\n")}
 
-For each headline found, provide:
-1. The exact text of the headline
-2. The type of headline (e.g., tagline, call-to-action, title)
-3. A description of its visual context (where it appears, styling, etc.)
+Florence OCR Results (with bounding boxes):
+${florenceHeadlines.map((result) => JSON.stringify(result)).join("\n")}
 
-Focus on headlines that are prominent and serve a clear purpose in the ad.
-If no headlines are found in the image, return an empty list.`,
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: imageUrl,
-            },
-          },
-        ],
+Merge these results following the system instructions.`,
       },
     ],
-    response_format: zodResponseFormat(headlineExtractionSchema, "headlines"),
-    temperature: 0.3,
+    response_format: zodResponseFormat(
+      extractedHeadlinesWithLocationSchema,
+      "headlines",
+    ),
+    temperature: 0,
   });
 
-  const headlines = response.choices[0].message.parsed?.headlines;
-  if (!headlines) {
+  const extractedHeadlines = response.choices[0].message.parsed?.headlines;
+  if (!extractedHeadlines) {
     throw new Error("No headlines in response");
   }
 
-  return headlines as z.infer<typeof headlineExtractionSchemaArray>;
+  return extractedHeadlines;
 }
 
 async function generateHeadlineVariants(
-  originalHeadlines: Array<
-    { text: string; type: string; visual_context: string }
-  >,
+  originalHeadlines: z.infer<typeof extractedHeadlinesWithLocationSchemaArray>,
   adData: AdVariantItem,
   contentRules: z.infer<typeof contentRuleSchema>[],
 ) {

@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import Image from "next/image";
+import React, { useState, useEffect, useRef } from "react";
 import { CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -53,6 +52,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 // Update the type for original headlines
 type OriginalHeadline = {
@@ -154,6 +154,23 @@ const formatUrl = (url: string): string => {
   }
 };
 
+type Headline = {
+  area?: number;
+  text: string;
+  type: string;
+  original: string;
+  aspect_ratio?: number;
+  bounding_box?: {
+    width: number;
+    center: [number, number];
+    height: number;
+    top_left: [number, number];
+    top_right: [number, number];
+    bottom_left: [number, number];
+    bottom_right: [number, number];
+  };
+};
+
 // Component to handle ad image display with ad blocker consideration
 const AdImage = ({
   src,
@@ -163,6 +180,8 @@ const AdImage = ({
   isSelected = false,
   onClick,
   preserveAspectRatio = false,
+  new_headlines = [],
+  handleBoundingBoxClick = () => {},
 }: {
   src?: string;
   className?: string;
@@ -171,10 +190,22 @@ const AdImage = ({
   isSelected?: boolean;
   onClick?: () => void;
   preserveAspectRatio?: boolean;
+  new_headlines?: Array<Headline>;
+  handleBoundingBoxClick?: (headline: Headline) => void;
 }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [wasBlocked, setWasBlocked] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const [originalDimensions, setOriginalDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   // Check if a URL is likely to be blocked by ad blockers
   const isLikelyToBeBlocked = (url: string): boolean => {
@@ -208,12 +239,94 @@ const AdImage = ({
   // Computed image URL with proxy if needed
   const imageUrl = React.useMemo(() => getImageUrl(src), [src]);
 
-  // Reset error state if src changes
+  // Reset dimensions when src changes or when component remounts
   useEffect(() => {
     setHasError(false);
     setIsLoading(true);
     setWasBlocked(false);
-  }, [src]);
+    setOriginalDimensions(null);
+    setImageDimensions(null);
+
+    // Get original image dimensions
+    if (imageUrl) {
+      const img = new window.Image();
+      img.onload = () => {
+        setOriginalDimensions({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      };
+      img.src = imageUrl;
+    }
+
+    // Cleanup function
+    return () => {
+      setImageDimensions(null);
+      setOriginalDimensions(null);
+    };
+  }, [imageUrl]);
+
+  // Update container and rendered image dimensions when image loads or container resizes
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (!containerRef.current || !imageRef.current) return;
+
+      const imageRect = imageRef.current.getBoundingClientRect();
+
+      // Only update if dimensions have actually changed
+      if (
+        !imageDimensions ||
+        imageDimensions.width !== imageRect.width ||
+        imageDimensions.height !== imageRect.height
+      ) {
+        setImageDimensions({
+          width: imageRect.width,
+          height: imageRect.height,
+        });
+      }
+    };
+
+    const observer = new ResizeObserver(updateDimensions);
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    // Initial update
+    updateDimensions();
+
+    return () => {
+      if (containerRef.current) {
+        observer.unobserve(containerRef.current);
+      }
+    };
+  }, [imageDimensions]);
+
+  // Add mutation observer to detect DOM changes that might affect layout
+  useEffect(() => {
+    const mutationObserver = new MutationObserver(() => {
+      if (containerRef.current && imageRef.current) {
+        const imageRect = imageRef.current.getBoundingClientRect();
+
+        setImageDimensions({
+          width: imageRect.width,
+          height: imageRect.height,
+        });
+      }
+    });
+
+    if (containerRef.current) {
+      mutationObserver.observe(containerRef.current, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    return () => {
+      mutationObserver.disconnect();
+    };
+  }, []);
 
   // Function to detect errors
   const handleImageError = () => {
@@ -256,6 +369,7 @@ const AdImage = ({
 
   return (
     <div
+      ref={containerRef}
       className={`relative border rounded-md overflow-hidden bg-background cursor-pointer transition-all hover:opacity-90 ${
         isSelected ? "ring-2 ring-primary" : ""
       } ${className}`}
@@ -264,7 +378,7 @@ const AdImage = ({
           ? { width: size, height: size }
           : preserveAspectRatio
           ? { aspectRatio: "1/1", width: "100%" }
-          : { width: "100%", minHeight: "400px" }
+          : { width: "100%", height: "100%" }
       }
       onClick={onClick}
     >
@@ -273,15 +387,136 @@ const AdImage = ({
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       )}
-      <Image
-        src={imageUrl}
-        alt={alt}
-        fill
-        className={preserveAspectRatio ? "object-cover" : "object-contain"}
-        onError={handleImageError}
-        onLoadingComplete={() => setIsLoading(false)}
-        unoptimized
-      />
+      <div className="flex items-center justify-center h-full w-full relative">
+        <img
+          ref={imageRef}
+          src={imageUrl}
+          alt={alt}
+          className={cn(
+            "w-full h-full",
+            isSelected ? "ring-2 ring-primary" : "",
+            preserveAspectRatio ? "object-cover" : "object-contain"
+          )}
+          style={{
+            maxWidth: "100%",
+            maxHeight: "100%",
+          }}
+          onError={handleImageError}
+          onLoad={(e) => {
+            setIsLoading(false);
+            // Update original dimensions when image loads
+            const img = e.target as HTMLImageElement;
+            setOriginalDimensions({
+              width: img.naturalWidth,
+              height: img.naturalHeight,
+            });
+          }}
+        />
+      </div>
+
+      {/* Bounding Box Overlays */}
+      {!isLoading &&
+        imageDimensions &&
+        originalDimensions &&
+        new_headlines.map((headline, index) => {
+          if (!headline.bounding_box) return null;
+
+          const box = headline.bounding_box;
+          const containerRect = containerRef.current?.getBoundingClientRect();
+          const imageRect = imageRef.current?.getBoundingClientRect();
+
+          if (!containerRect || !imageRect) return null;
+
+          // Calculate the actual rendered image dimensions
+          const renderedWidth = imageRect.width;
+          const renderedHeight = imageRect.height;
+
+          // Calculate scale factors based on the actual rendered image size
+          const scaleX = renderedWidth / originalDimensions.width;
+          const scaleY = renderedHeight / originalDimensions.height;
+
+          // Calculate padding due to object-contain
+          const horizontalPadding = (containerRect.width - renderedWidth) / 2;
+          const verticalPadding = (containerRect.height - renderedHeight) / 2;
+
+          // Scale and position the bounding box
+          const scaledBox = {
+            width: box.width * scaleX,
+            height: box.height * scaleY,
+            top: box.top_left[1] * scaleY + verticalPadding,
+            left: box.top_left[0] * scaleX + horizontalPadding,
+          };
+
+          // Calculate available space on each side
+          const spaceLeft = scaledBox.left;
+          const spaceRight =
+            containerRect.width - (scaledBox.left + scaledBox.width);
+          const spaceTop = scaledBox.top;
+
+          // Determine label position based on available space
+          // Try left/right first, then fallback to top/bottom if necessary
+          const labelWidth = 200; // max-w-[200px] from the className
+          const labelHeight = 32; // Approximate height of the label
+          const padding = 8; // Padding between box and label
+
+          let labelPosition: "left" | "right" | "top" | "bottom";
+
+          if (spaceLeft >= labelWidth + padding) {
+            labelPosition = "left";
+          } else if (spaceRight >= labelWidth + padding) {
+            labelPosition = "right";
+          } else if (spaceTop >= labelHeight + padding) {
+            labelPosition = "top";
+          } else {
+            labelPosition = "bottom";
+          }
+
+          return (
+            <div key={index} onClick={() => handleBoundingBoxClick(headline)}>
+              {/* Bounding box */}
+              <div
+                className="absolute border-2 border-primary/50 bg-primary/10 hover:bg-green-500/20 hover:border-green-500/50 transition-all"
+                style={{
+                  width: scaledBox.width,
+                  height: scaledBox.height,
+                  top: scaledBox.top,
+                  left: scaledBox.left,
+                }}
+              />
+
+              {/* Variant text */}
+              <div
+                className={`absolute px-2 py-1 bg-background/90 text-xs border rounded shadow-sm max-w-[200px] whitespace-normal`}
+                style={{
+                  ...{
+                    left:
+                      labelPosition === "left"
+                        ? scaledBox.left - labelWidth - padding
+                        : labelPosition === "right"
+                        ? scaledBox.left + scaledBox.width + padding
+                        : scaledBox.left,
+                    top:
+                      labelPosition === "top"
+                        ? scaledBox.top - labelHeight - padding
+                        : labelPosition === "bottom"
+                        ? scaledBox.top + scaledBox.height + padding
+                        : scaledBox.top +
+                          scaledBox.height / 2 -
+                          labelHeight / 2,
+                    width:
+                      labelPosition === "left" || labelPosition === "right"
+                        ? labelWidth
+                        : undefined,
+                    minHeight: labelHeight,
+                    height: "auto",
+                  },
+                }}
+              >
+                {headline.text}
+              </div>
+            </div>
+          );
+        })}
     </div>
   );
 };
@@ -954,12 +1189,14 @@ export default function Automations() {
                           {/* Ad Preview */}
                           <div className="space-y-4">
                             <h3 className="text-sm font-medium">Ad Preview</h3>
-                            <AdImage
-                              src={selectedAd.mr_image_url}
-                              alt="Ad preview"
-                              className="w-full max-h-[400px]"
-                              preserveAspectRatio={false}
-                            />
+                            <div className="w-full flex items-center justify-center border rounded-lg">
+                              <AdImage
+                                src={selectedAd.mr_image_url}
+                                alt="Ad preview"
+                                className="w-full max-w-[600px]"
+                                preserveAspectRatio={false}
+                              />
+                            </div>
                           </div>
 
                           {/* Generated Variants Section */}
@@ -1091,8 +1328,26 @@ export default function Automations() {
                                             <AdImage
                                               src={selectedVariant.image_url}
                                               alt="Ad preview"
-                                              className="w-full max-h-[400px]"
+                                              className="w-full"
                                               preserveAspectRatio={false}
+                                              new_headlines={
+                                                selectedVariant.new_headlines
+                                              }
+                                              handleBoundingBoxClick={(
+                                                headline
+                                              ) => {
+                                                // Find the index of the clicked headline
+                                                const index =
+                                                  selectedVariant.new_headlines.findIndex(
+                                                    (h) =>
+                                                      h.text === headline.text
+                                                  );
+                                                if (index !== -1) {
+                                                  setCurrentHeadlineIndex(
+                                                    index
+                                                  );
+                                                }
+                                              }}
                                             />
                                           </div>
 

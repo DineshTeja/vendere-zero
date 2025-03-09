@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from traceback import print_exc
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
@@ -11,6 +12,15 @@ from typing import List, Optional, Dict, Any
 import os
 import asyncio
 import time
+from transformers import AutoModelForCausalLM, AutoProcessor  # type: ignore[import-untyped]
+from pydantic import BaseModel
+from scripts.hf_models import (
+    florence_model,
+    load_florence_model,
+    get_image_from_url,
+    parse_florence_result,
+    TextRegion,
+)
 
 # Change relative imports to absolute imports
 from scripts.knowledge.base_queries import KnowledgeBase, QueryRequest
@@ -41,9 +51,10 @@ async def lifespan(app: FastAPI):
     global kb, market_analyzer, variant_generator, keyword_generator
 
     logger.info("Initializing services...")
-    kb = KnowledgeBase()
-    market_analyzer = MarketResearchAnalyzer()
-    variant_generator = VariantGenerator()
+    # kb = KnowledgeBase()
+    # market_analyzer = MarketResearchAnalyzer()
+    # variant_generator = VariantGenerator()
+    load_florence_model()
     # keyword_generator = KeywordVariantGenerator()
     logger.info("Services initialized successfully")
 
@@ -54,6 +65,7 @@ async def lifespan(app: FastAPI):
     market_analyzer = None  # type: ignore
     variant_generator = None  # type: ignore
     keyword_generator = None  # type: ignore
+
     logger.info("Services shut down")
 
 
@@ -67,6 +79,7 @@ app = FastAPI(
 kb: Optional[KnowledgeBase] = None
 market_analyzer: Optional[MarketResearchAnalyzer] = None
 variant_generator: Optional[VariantGenerator] = None
+
 # keyword_generator: Optional[KeywordVariantGenerator] = None
 
 
@@ -563,6 +576,63 @@ async def health_check():
 async def test_endpoint():
     """Simple test endpoint for debugging"""
     return {"message": "API server is running"}
+
+
+# Add new request/response models
+class OCRRequest(BaseModel):
+    image_url: str
+
+
+# Add new endpoint
+@app.post("/ocr/detect", response_model=List[TextRegion])
+async def detect_text_endpoint(request: OCRRequest):
+    """Detect and extract text from an image using Florence model"""
+    try:
+        logger.info(f"Processing image URL: {request.image_url}")
+
+        # Get image from URL
+        try:
+            image = get_image_from_url(request.image_url)
+            logger.info(
+                f"Image loaded successfully. Mode: {image.mode}, Size: {image.size}"
+            )
+        except Exception as e:
+            logger.error(f"Error fetching image: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Failed to fetch image from URL: {str(e)}"
+            )
+
+        # Process with Florence model
+        try:
+            # Set max execution time to 30 seconds
+            max_execution_time = 30
+
+            result = florence_model(image)
+            structured_result = parse_florence_result(result)
+
+            logger.info(
+                f"Successfully processed image, found {len(structured_result)} text regions"
+            )
+            return structured_result
+
+        except asyncio.TimeoutError:
+            logger.error("OCR processing timed out")
+            raise HTTPException(
+                status_code=408,
+                detail=f"OCR processing timed out after {max_execution_time} seconds",
+            )
+        except Exception as e:
+            logger.error(f"Error processing image with Florence model: {str(e)}")
+            print_exc()
+            raise HTTPException(
+                status_code=500, detail=f"Failed to process image: {str(e)}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in detect_text_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():
