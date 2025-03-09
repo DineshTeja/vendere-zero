@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 import uvicorn
 import logging
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 import os
 import asyncio
+import time
 
 # Change relative imports to absolute imports
 from scripts.knowledge.base_queries import KnowledgeBase, QueryRequest
@@ -84,6 +86,79 @@ async def query_endpoint(request: QueryRequest):
     except Exception as e:
         logger.error(f"Error in query endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge/query/stream")
+async def query_stream_endpoint(request: QueryRequest):
+    """
+    Streaming knowledge base query endpoint.
+    Yields SSE data from the LLM as it is generated.
+    """
+    if not kb:
+        raise HTTPException(status_code=500, detail="Knowledge base not initialized")
+
+    query = request.query
+    detail_level = request.detail_level
+
+    async def event_generator():
+        try:
+            # Stream with timeout protection
+            start_time = time.time()
+            max_duration = 120  # 2 minutes max
+
+            # Get the generator from stream_query
+            stream_gen = kb.stream_query(query, detail_level)
+
+            # Since stream_query returns a regular generator (not async),
+            # we need to iterate over it differently
+            loop = asyncio.get_event_loop()
+
+            while True:
+                try:
+                    # Use run_in_executor to get the next item from the generator without blocking
+                    def get_next_item():
+                        try:
+                            return next(stream_gen)
+                        except StopIteration:
+                            return None
+
+                    line = await loop.run_in_executor(None, get_next_item)
+                    if line is None:  # StopIteration - generator is exhausted
+                        break
+
+                    yield line
+
+                    # Check if we've exceeded the maximum allowed time
+                    if time.time() - start_time > max_duration:
+                        logger.warning(
+                            f"Stream taking too long (over {max_duration}s), forcing completion"
+                        )
+                        yield f"data: Stream terminated due to timeout after {max_duration} seconds.\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+                except Exception as e:
+                    logger.error(f"Error iterating stream: {e}")
+                    break
+
+        except Exception as e:
+            logger.error(f"Error in streaming response: {str(e)}")
+            # Send error message in SSE format
+            yield f"data: Error generating response: {str(e)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            # Always send a [DONE] marker at the end to ensure completion
+            yield "data: [DONE]\n\n"
+            logger.info("Stream completed with [DONE] marker")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering in nginx
+        },
+    )
 
 
 # Market Research Routes

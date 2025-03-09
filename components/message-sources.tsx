@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ExternalLink, FileText, Image as ImageIcon, Globe, Calendar, Tag, Clock, Info, ArrowRight, Link as LinkIcon } from 'lucide-react';
+import { ExternalLink, FileText, Image as ImageIcon, Globe, Tag, Info, ArrowRight, Link as LinkIcon, TrendingUp } from 'lucide-react';
 import { Button } from './ui/button';
 import { supabase } from '@/lib/supabase';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -14,12 +14,13 @@ export interface Source {
     text: string;
     score: number;
     extra_info: {
-        type: 'ad' | 'market_research' | 'citation' | string;
+        type: 'ad' | 'market_research' | 'citation' | 'attribution_campaign' | 'attribution_channel' | string;
         id: string;
         url?: string;
         image_url?: string;
-        name?: string; // Source name
-        domain?: string; // Source domain
+        name?: string;
+        domain?: string;
+        raw_data?: any; // For attribution data
     };
 }
 
@@ -35,13 +36,25 @@ interface SourceRecord {
     intent_summary?: string;
     description?: string;
     created_at?: string;
-    keywords?: any[];
+    keywords?: KeywordItem[];
     buying_stage?: string;
     primary_intent?: string;
     site_url?: string;
     preview_url?: string;
     type?: string;
     features?: string[];
+    // For attribution data
+    campaign_id?: string;
+    ad_id?: string;
+    avg_ctr?: number;
+    avg_roas?: number;
+    avg_conversion_rate?: number;
+}
+
+// Define a more specific type for keywords
+interface KeywordItem {
+    keyword?: string;
+    term?: string;
 }
 
 // Function to extract domain from URL
@@ -49,7 +62,7 @@ function extractDomain(url: string): string {
     try {
         const domain = new URL(url).hostname;
         return domain.replace(/^www\./, '');
-    } catch (e) {
+    } catch {
         return url;
     }
 }
@@ -79,12 +92,16 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
             const marketResearchIds: string[] = [];
             const libraryItemIds: string[] = [];
             const citationResearchIds: string[] = [];
+            const attributionCampaignIds: string[] = [];
+            const attributionChannelIds: string[] = [];
 
             sources.forEach(source => {
                 const { type, id } = source.extra_info;
                 if (type === 'market_research') marketResearchIds.push(id);
-                else if (type === 'ad') libraryItemIds.push(id);
+                else if (type === 'visual') libraryItemIds.push(id);
                 else if (type === 'citation') citationResearchIds.push(id);
+                else if (type === 'attribution_campaign') attributionCampaignIds.push(id);
+                else if (type === 'attribution_channel') attributionChannelIds.push(id);
             });
 
             // Fetch market research records
@@ -106,7 +123,7 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
                 const { data: libraryData } = await supabase
                     .from('library_items')
                     .select('id, name, description, preview_url, features, created_at, type')
-                    .in('item_id', libraryItemIds);
+                    .in('id', libraryItemIds);
 
                 if (libraryData) {
                     libraryData.forEach(record => {
@@ -129,6 +146,93 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
                 if (citationData) {
                     citationData.forEach(record => {
                         recordsMap[record.id] = record;
+                    });
+                }
+            }
+
+            // Fetch attribution campaign data and associated ads
+            if (attributionCampaignIds.length > 0) {
+                // First get the campaign metrics
+                const { data: campaignData } = await supabase
+                    .from('enhanced_ad_metrics_by_campaign')
+                    .select('*')
+                    .in('campaign_id', attributionCampaignIds);
+
+                if (campaignData) {
+                    // Map campaign data to records
+                    campaignData.forEach(record => {
+                        recordsMap[record.campaign_id] = {
+                            ...record,
+                            id: record.campaign_id,
+                            name: `Campaign: ${record.campaign_id}`,
+                            avg_ctr: record.avg_ctr,
+                            avg_roas: record.avg_roas,
+                            avg_conversion_rate: record.avg_conversion_rate
+                        };
+                    });
+
+                    // Try to get ad details for campaigns from enhanced_ad_metrics
+                    const campaignWithAds = campaignData.filter(c => c.campaign_id);
+                    if (campaignWithAds.length > 0) {
+                        // Get ad IDs for these campaigns
+                        const { data: adMetricsData } = await supabase
+                            .from('enhanced_ad_metrics')
+                            .select('ad_id, campaign_id')
+                            .in('campaign_id', campaignWithAds.map(c => c.campaign_id));
+
+                        if (adMetricsData && adMetricsData.length > 0) {
+                            // Get unique ad IDs
+                            const adIds = [...new Set(adMetricsData.map(item => item.ad_id))];
+
+                            // Fetch library items for these ad IDs
+                            const { data: adLibraryData } = await supabase
+                                .from('library_items')
+                                .select('id, name, preview_url, features, created_at, type')
+                                .in('item_id', adIds);
+
+                            if (adLibraryData) {
+                                // Map ads to their campaigns
+                                adMetricsData.forEach(adMetric => {
+                                    const matchingAd = adLibraryData.find(ad => ad.item_id === adMetric.ad_id);
+                                    if (matchingAd && recordsMap[adMetric.campaign_id]) {
+                                        // Add ad details to the campaign record
+                                        recordsMap[adMetric.campaign_id] = {
+                                            ...recordsMap[adMetric.campaign_id],
+                                            image_url: matchingAd.preview_url,
+                                            ad_id: adMetric.ad_id,
+                                            features: matchingAd.features
+                                        };
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fetch attribution channel data
+            if (attributionChannelIds.length > 0) {
+                // For channel data, we need to extract the channel name from the combined ID
+                const channelNames = attributionChannelIds.map(id => id.split('_')[0]);
+
+                // Get the channel metrics
+                const { data: channelData } = await supabase
+                    .from('enhanced_ad_metrics_by_channel')
+                    .select('*')
+                    .in('channel', channelNames);
+
+                if (channelData) {
+                    channelData.forEach(record => {
+                        const channelId = `${record.channel}_${record.date || ''}`;
+                        if (attributionChannelIds.includes(channelId)) {
+                            recordsMap[channelId] = {
+                                ...record,
+                                id: channelId,
+                                name: `Channel: ${record.channel}${record.date ? ` (${record.date})` : ''}`,
+                                avg_ctr: record.avg_ctr,
+                                avg_conversion_rate: record.avg_conversion_rate
+                            };
+                        }
                     });
                 }
             }
@@ -251,7 +355,7 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
                                 >
                                     {sources.map((source) => (
                                         <SourceCard
-                                            key={`source-${source.id}`}
+                                            key={`source-${source.extra_info.id}`}
                                             source={source}
                                             record={sourceRecords[source.extra_info.id]}
                                             isLoading={isLoading}
@@ -342,34 +446,34 @@ function SourceCard({ source, record, isLoading }: {
     // Use record data if available, otherwise fall back to source data
     const displayName = record?.name || name || (domain ? domain.replace(/^www\./, '') : "Untitled Source");
     const imageUrl = record?.image_url || sourceImageUrl;
-    const description = record?.description || record?.intent_summary || source.text;
-    const createdAt = record?.created_at ? new Date(record.created_at) : null;
     const keywords = record?.keywords || [];
     const buyingStage = record?.buying_stage;
 
-    // Format date if available
-    const formattedDate = createdAt ?
-        createdAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) :
-        null;
-
-    // Determine source type display name
-    function getSourceType() {
-        switch (type) {
-            case 'ad':
-                return 'Advertisement';
-            case 'market_research':
-                return 'Market Research';
-            case 'citation':
-                return 'Citation';
-            default:
-                return type.charAt(0).toUpperCase() + type.slice(1);
-        }
-    }
+    // Attribution-specific data
+    const isAttribution = type === "attribution_campaign" || type === "attribution_channel";
+    const avgCtr = record?.avg_ctr;
+    const avgRoas = record?.avg_roas;
+    const avgConversionRate = record?.avg_conversion_rate;
 
     // Determine the link to use
-    const linkHref = url ||
-        (type === "ad" ? `/library/${id}` :
-            (type === "market_research" || type === "citation") ? `/market/${id}` : '#');
+    let linkHref = '#';
+
+    if (url) {
+        linkHref = url;
+    } else if (type === "ad" || (record?.ad_id && isAttribution)) {
+        // For attribution sources with ad_id, link to the ad
+        linkHref = `/library/${record?.ad_id || id}`;
+    } else if (type === "visual") {
+        linkHref = `/library/${id}`;
+    } else if (type === "market_research" || type === "citation") {
+        linkHref = `/market/${id}`;
+    } else if (isAttribution) {
+        // For attribution sources without ad_id, create a filtered analytics link
+        const filterParam = type === "attribution_campaign"
+            ? `campaign_id=${id}`
+            : `channel=${id.split('_')[0]}`;
+        linkHref = `/analytics?${filterParam}`;
+    }
 
     return (
         <div className="flex flex-col rounded-none bg-background/30 hover:bg-background/50 transition-colors border border-border/30 min-w-[200px] w-[200px] overflow-hidden flex-shrink-0 snap-start">
@@ -418,6 +522,31 @@ function SourceCard({ source, record, isLoading }: {
                     <>
                         {/* Metadata section */}
                         <div className="flex flex-wrap gap-1.5 p-0">
+                            {/* Attribution metrics if available */}
+                            {isAttribution && (
+                                <>
+                                    {avgCtr !== null && avgCtr !== undefined && (
+                                        <div className="flex items-center text-xs text-white/60">
+                                            <TrendingUp className="h-3 w-3 mr-1" />
+                                            CTR: {(avgCtr * 100).toFixed(2)}%
+                                        </div>
+                                    )}
+                                    {avgRoas !== null && avgRoas !== undefined && (
+                                        <div className="flex items-center text-xs text-white/60">
+                                            <TrendingUp className="h-3 w-3 mr-1" />
+                                            ROAS: {avgRoas.toFixed(2)}x
+                                        </div>
+                                    )}
+                                    {avgConversionRate !== null && avgConversionRate !== undefined && (
+                                        <div className="flex items-center text-xs text-white/60">
+                                            <TrendingUp className="h-3 w-3 mr-1" />
+                                            Conv: {(avgConversionRate * 100).toFixed(2)}%
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {/* Regular metadata */}
                             {buyingStage && (
                                 <div className="flex items-center text-xs text-white/60">
                                     <Info className="h-3 w-3 mr-1" />
@@ -433,6 +562,14 @@ function SourceCard({ source, record, isLoading }: {
                                         : keywords[0]?.keyword || keywords[0]?.term || ''}
                                 </div>
                             )}
+
+                            {/* Features for ad content or attribution linked to ads */}
+                            {record?.features && record.features.length > 0 && (
+                                <div className="flex items-center text-xs text-white/60">
+                                    <Tag className="h-3 w-3 mr-1" />
+                                    {record.features[0]}
+                                </div>
+                            )}
                         </div>
                     </>
                 )}
@@ -444,11 +581,16 @@ function SourceCard({ source, record, isLoading }: {
 function SourceIcon({ type }: { type: string }) {
     switch (type) {
         case 'ad':
+        case 'visual':
             return <ImageIcon className="h-4 w-4 text-blue-400" />;
         case 'market_research':
             return <FileText className="h-4 w-4 text-green-400" />;
         case 'citation':
             return <ExternalLink className="h-4 w-4 text-purple-400" />;
+        case 'attribution_campaign':
+            return <TrendingUp className="h-4 w-4 text-orange-400" />;
+        case 'attribution_channel':
+            return <TrendingUp className="h-4 w-4 text-yellow-400" />;
         default:
             return <Globe className="h-4 w-4 text-gray-400" />;
     }

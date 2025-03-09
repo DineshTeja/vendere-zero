@@ -8,10 +8,8 @@ import { memo, useState } from 'react';
 import { DocumentToolCall, DocumentToolResult } from '@/components/document';
 import {
   PencilEditIcon,
-  SparklesIcon,
 } from '@/components/icons';
 import { Markdown } from '@/components/markdown';
-import { MessageActions } from '@/components/message-actions';
 import { PreviewAttachment } from '@/components/preview-attachment';
 import { Weather } from '@/components/weather';
 import equal from 'fast-deep-equal';
@@ -21,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { MessageEditor } from '@/components/message-editor';
 import { DocumentPreview } from '@/components/document-preview';
 import { MessageReasoning } from '@/components/message-reasoning';
-import { Ratio, Loader2 } from 'lucide-react';
+import { Ratio } from 'lucide-react';
 import { MessageSources, Source } from '@/components/message-sources';
 
 // Extend the Message type to include sources

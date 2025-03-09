@@ -68,6 +68,30 @@ export type Database = {
         }
         Relationships: []
       }
+      ad_variants: {
+        Row: {
+          id: string
+          image_url: string | null
+          new_headlines: Json[] | null
+          original_headlines: Json[] | null
+          predicted_ctr: number | null
+        }
+        Insert: {
+          id?: string
+          image_url?: string | null
+          new_headlines?: Json[] | null
+          original_headlines?: Json[] | null
+          predicted_ctr?: number | null
+        }
+        Update: {
+          id?: string
+          image_url?: string | null
+          new_headlines?: Json[] | null
+          original_headlines?: Json[] | null
+          predicted_ctr?: number | null
+        }
+        Relationships: []
+      }
       citation_research: {
         Row: {
           buying_stage: string
@@ -119,6 +143,39 @@ export type Database = {
           secondary_intents?: string[]
           site_url?: string
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      custom_rules: {
+        Row: {
+          created_at: string | null
+          description: string
+          id: string
+          name: string
+          type: string
+          updated_at: string | null
+          user_id: string
+          value: Json
+        }
+        Insert: {
+          created_at?: string | null
+          description: string
+          id?: string
+          name: string
+          type: string
+          updated_at?: string | null
+          user_id: string
+          value: Json
+        }
+        Update: {
+          created_at?: string | null
+          description?: string
+          id?: string
+          name?: string
+          type?: string
+          updated_at?: string | null
+          user_id?: string
+          value?: Json
         }
         Relationships: []
       }
@@ -200,6 +257,48 @@ export type Database = {
         }
         Relationships: []
       }
+      feature_metrics_summary: {
+        Row: {
+          ad_structured_output_ids: string[] | null
+          avg_clicks: number | null
+          avg_conversions: number | null
+          avg_cost: number | null
+          avg_ctr: number | null
+          avg_impressions: number | null
+          avg_roas: number | null
+          categories_ranked: string[] | null
+          library_item_ids: string[] | null
+          locations_ranked: string[] | null
+          unique_feature: string | null
+        }
+        Insert: {
+          ad_structured_output_ids?: string[] | null
+          avg_clicks?: number | null
+          avg_conversions?: number | null
+          avg_cost?: number | null
+          avg_ctr?: number | null
+          avg_impressions?: number | null
+          avg_roas?: number | null
+          categories_ranked?: string[] | null
+          library_item_ids?: string[] | null
+          locations_ranked?: string[] | null
+          unique_feature?: string | null
+        }
+        Update: {
+          ad_structured_output_ids?: string[] | null
+          avg_clicks?: number | null
+          avg_conversions?: number | null
+          avg_cost?: number | null
+          avg_ctr?: number | null
+          avg_impressions?: number | null
+          avg_roas?: number | null
+          categories_ranked?: string[] | null
+          library_item_ids?: string[] | null
+          locations_ranked?: string[] | null
+          unique_feature?: string | null
+        }
+        Relationships: []
+      }
       features: {
         Row: {
           ad_output_id: string
@@ -268,6 +367,39 @@ export type Database = {
           image_url?: string | null
           last_shown?: string | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      headline_variants: {
+        Row: {
+          created_at: string | null
+          id: string
+          image_url: string
+          new_headlines: Json
+          original_headlines: Json
+          rules_used: Json
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          image_url: string
+          new_headlines?: Json
+          original_headlines?: Json
+          rules_used?: Json
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          image_url?: string
+          new_headlines?: Json
+          original_headlines?: Json
+          rules_used?: Json
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -445,6 +577,54 @@ export type Database = {
           id?: string
           insights?: Json | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      materials: {
+        Row: {
+          analysis: string
+          content_rules: Json
+          content_type: string | null
+          crawled_urls: Json
+          created_at: string | null
+          id: string
+          image_urls: string[] | null
+          material_type: string | null
+          material_url: string
+          summary: string
+          tags: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          analysis: string
+          content_rules?: Json
+          content_type?: string | null
+          crawled_urls?: Json
+          created_at?: string | null
+          id?: string
+          image_urls?: string[] | null
+          material_type?: string | null
+          material_url: string
+          summary: string
+          tags?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          analysis?: string
+          content_rules?: Json
+          content_type?: string | null
+          crawled_urls?: Json
+          created_at?: string | null
+          id?: string
+          image_urls?: string[] | null
+          material_type?: string | null
+          material_url?: string
+          summary?: string
+          tags?: string[] | null
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -687,11 +867,15 @@ export type Database = {
     Views: {
       enhanced_ad_metrics_by_campaign: {
         Row: {
+          ad_id: string | null
           avg_conversion_rate: number | null
           avg_ctr: number | null
           avg_roas: number | null
           campaign_id: string | null
           cost_per_conversion: number | null
+          image_description: string | null
+          image_url: string | null
+          library_item_id: string | null
           total_clicks: number | null
           total_conversions: number | null
           total_cost: number | null
@@ -809,7 +993,12 @@ export type Database = {
       task_status: "pending" | "processing" | "completed" | "failed"
     }
     CompositeTypes: {
-      [_ in never]: never
+      ad_element: {
+        type: string | null
+        location: string | null
+        code: string | null
+        text: string | null
+      }
     }
   }
 }
