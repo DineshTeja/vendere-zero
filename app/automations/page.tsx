@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { CardTitle, CardDescription } from "@/components/ui/card";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import {
@@ -11,14 +10,18 @@ import {
   Scroll,
   Plus,
   ExternalLink,
-  ChevronLeft,
-  ChevronRight,
-  Trash2,
-  Eye,
-  MousePointerClick,
-  Target,
+  LayoutGrid,
+  Clock,
+  MoreHorizontal,
+  ArrowLeft,
+  Tag,
+  Shield,
+  Paintbrush,
+  MessageSquare,
+  FileText,
+  Users,
+  Mail,
 } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { motion } from "framer-motion";
@@ -43,21 +46,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { cn } from "@/lib/utils";
-import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogHeader,
@@ -67,24 +55,15 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
-import { Progress } from "@/components/ui/progress";
-import ReactMarkdown from "react-markdown";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import remarkGfm from "remark-gfm";
+import VariantsDisplay from "./VariantsDisplay";
+import AdImage from "./AdImage";
 
-// Update the type for original headlines
 type OriginalHeadline = {
   text: string;
   type: string;
   visual_context: string;
 };
 
-// Update the RPC function result type
 type AdVariantItem = {
   mr_id: string;
   mr_user_id: string;
@@ -126,16 +105,15 @@ type CustomRule = {
   name: string;
   description: string;
   value:
-    | string
-    | number
-    | boolean
-    | string[]
-    | Record<string, string | number | boolean>;
+  | string
+  | number
+  | boolean
+  | string[]
+  | Record<string, string | number | boolean>;
   created_at: string;
   updated_at: string;
 };
 
-// Type for brand material rules
 type BrandMaterial = {
   id: string;
   material_url: string;
@@ -145,11 +123,11 @@ type BrandMaterial = {
     name: string;
     description: string;
     value:
-      | string
-      | number
-      | boolean
-      | string[]
-      | Record<string, string | number | boolean>;
+    | string
+    | number
+    | boolean
+    | string[]
+    | Record<string, string | number | boolean>;
   }[];
 };
 
@@ -175,384 +153,6 @@ const formatUrl = (url: string): string => {
   } catch {
     return url.slice(0, 30) + (url.length > 30 ? "..." : "");
   }
-};
-
-type Headline = {
-  area?: number;
-  text: string;
-  type: string;
-  original: string;
-  aspect_ratio?: number;
-  bounding_box?: {
-    width: number;
-    center: [number, number];
-    height: number;
-    top_left: [number, number];
-    top_right: [number, number];
-    bottom_left: [number, number];
-    bottom_right: [number, number];
-  };
-};
-
-// Utility function to format large numbers
-const formatCompactNumber = (num: number): string => {
-  if (num >= 1000000) {
-    return `${(num / 1000000).toFixed(1)}M`;
-  }
-  if (num >= 1000) {
-    return `${(num / 1000).toFixed(1)}k`;
-  }
-  return num.toString();
-};
-
-// Component to handle ad image display with ad blocker consideration
-const AdImage = ({
-  src,
-  className = "",
-  size,
-  alt = "Ad image",
-  isSelected = false,
-  onClick,
-  preserveAspectRatio = false,
-  new_headlines = [],
-  handleBoundingBoxClick = () => {},
-}: {
-  src?: string;
-  className?: string;
-  size?: number;
-  alt?: string;
-  isSelected?: boolean;
-  onClick?: () => void;
-  preserveAspectRatio?: boolean;
-  new_headlines?: Array<Headline>;
-  handleBoundingBoxClick?: (headline: Headline) => void;
-}) => {
-  const [hasError, setHasError] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [wasBlocked, setWasBlocked] = useState(false);
-  const [imageDimensions, setImageDimensions] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
-  const [originalDimensions, setOriginalDimensions] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
-
-  // Check if a URL is likely to be blocked by ad blockers
-  const isLikelyToBeBlocked = (url: string): boolean => {
-    return (
-      url.includes("googlesyndication") ||
-      url.includes("googleads") ||
-      url.includes("doubleclick") ||
-      url.includes("ad.") ||
-      url.includes(".ad") ||
-      url.includes("ads.") ||
-      url.includes(".ads")
-    );
-  };
-
-  // Process image URL - use proxy for potentially blocked URLs
-  const getImageUrl = (originalUrl?: string): string | undefined => {
-    if (!originalUrl) return undefined;
-
-    // If it's a data URL, return as is
-    if (originalUrl.startsWith("data:")) return originalUrl;
-
-    // If URL is likely to be blocked, use our proxy
-    if (isLikelyToBeBlocked(originalUrl)) {
-      return `/api/proxy-image?url=${encodeURIComponent(originalUrl)}`;
-    }
-
-    // Otherwise return the original URL
-    return originalUrl;
-  };
-
-  // Computed image URL with proxy if needed
-  const imageUrl = React.useMemo(() => getImageUrl(src), [src]);
-
-  // Reset dimensions when src changes or when component remounts
-  useEffect(() => {
-    setHasError(false);
-    setIsLoading(true);
-    setWasBlocked(false);
-    setOriginalDimensions(null);
-    setImageDimensions(null);
-
-    // Get original image dimensions
-    if (imageUrl) {
-      const img = new window.Image();
-      img.onload = () => {
-        setOriginalDimensions({
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-        });
-      };
-      img.src = imageUrl;
-    }
-
-    // Cleanup function
-    return () => {
-      setImageDimensions(null);
-      setOriginalDimensions(null);
-    };
-  }, [imageUrl]);
-
-  // Update container and rendered image dimensions when image loads or container resizes
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (!containerRef.current || !imageRef.current) return;
-
-      const imageRect = imageRef.current.getBoundingClientRect();
-
-      // Only update if dimensions have actually changed
-      if (
-        !imageDimensions ||
-        imageDimensions.width !== imageRect.width ||
-        imageDimensions.height !== imageRect.height
-      ) {
-        setImageDimensions({
-          width: imageRect.width,
-          height: imageRect.height,
-        });
-      }
-    };
-
-    const observer = new ResizeObserver(updateDimensions);
-
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-
-    // Initial update
-    updateDimensions();
-
-    return () => {
-      if (containerRef.current) {
-        observer.unobserve(containerRef.current);
-      }
-    };
-  }, [imageDimensions]);
-
-  // Add mutation observer to detect DOM changes that might affect layout
-  useEffect(() => {
-    const mutationObserver = new MutationObserver(() => {
-      if (containerRef.current && imageRef.current) {
-        const imageRect = imageRef.current.getBoundingClientRect();
-
-        setImageDimensions({
-          width: imageRect.width,
-          height: imageRect.height,
-        });
-      }
-    });
-
-    if (containerRef.current) {
-      mutationObserver.observe(containerRef.current, {
-        attributes: true,
-        childList: true,
-        subtree: true,
-      });
-    }
-
-    return () => {
-      mutationObserver.disconnect();
-    };
-  }, []);
-
-  // Function to detect errors
-  const handleImageError = () => {
-    setHasError(true);
-    setIsLoading(false);
-
-    // If the URL seems like it would be blocked, mark it
-    if (src && isLikelyToBeBlocked(src)) {
-      setWasBlocked(true);
-    }
-  };
-
-  // If no source or error, show fallback
-  if (!imageUrl || hasError) {
-    return (
-      <div
-        className={`flex items-center justify-center bg-muted/40 text-muted-foreground text-xs text-center p-1 rounded-md border ${className} ${
-          isSelected ? "ring-2 ring-primary" : ""
-        }`}
-        style={
-          size
-            ? { width: size, height: size }
-            : preserveAspectRatio
-            ? { aspectRatio: "1/1", width: "100%" }
-            : { width: "100%", minHeight: "400px" }
-        }
-        onClick={onClick}
-      >
-        {wasBlocked ? (
-          <div className="flex flex-col items-center">
-            <span>Ad</span>
-            <span className="text-[9px] mt-1">(Blocked)</span>
-          </div>
-        ) : (
-          <Settings className="h-5 w-5 opacity-40" />
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      className={`relative border rounded-md overflow-hidden bg-background cursor-pointer transition-all hover:opacity-90 ${
-        isSelected ? "ring-2 ring-primary" : ""
-      } ${className}`}
-      style={
-        size
-          ? { width: size, height: size }
-          : preserveAspectRatio
-          ? { aspectRatio: "1/1", width: "100%" }
-          : { width: "100%", height: "100%" }
-      }
-      onClick={onClick}
-    >
-      {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-muted/30 z-10">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-      )}
-      <div className="flex items-center justify-center h-full w-full relative">
-        <img
-          ref={imageRef}
-          src={imageUrl}
-          alt={alt}
-          className={cn(
-            "w-full h-full",
-            isSelected ? "ring-2 ring-primary" : "",
-            preserveAspectRatio ? "object-cover" : "object-contain"
-          )}
-          style={{
-            maxWidth: "100%",
-            maxHeight: "100%",
-          }}
-          onError={handleImageError}
-          onLoad={(e) => {
-            setIsLoading(false);
-            // Update original dimensions when image loads
-            const img = e.target as HTMLImageElement;
-            setOriginalDimensions({
-              width: img.naturalWidth,
-              height: img.naturalHeight,
-            });
-          }}
-        />
-      </div>
-
-      {/* Bounding Box Overlays */}
-      {!isLoading &&
-        imageDimensions &&
-        originalDimensions &&
-        new_headlines.map((headline, index) => {
-          if (!headline.bounding_box) return null;
-
-          const box = headline.bounding_box;
-          const containerRect = containerRef.current?.getBoundingClientRect();
-          const imageRect = imageRef.current?.getBoundingClientRect();
-
-          if (!containerRect || !imageRect) return null;
-
-          // Calculate the actual rendered image dimensions
-          const renderedWidth = imageRect.width;
-          const renderedHeight = imageRect.height;
-
-          // Calculate scale factors based on the actual rendered image size
-          const scaleX = renderedWidth / originalDimensions.width;
-          const scaleY = renderedHeight / originalDimensions.height;
-
-          // Calculate padding due to object-contain
-          const horizontalPadding = (containerRect.width - renderedWidth) / 2;
-          const verticalPadding = (containerRect.height - renderedHeight) / 2;
-
-          // Scale and position the bounding box
-          const scaledBox = {
-            width: box.width * scaleX,
-            height: box.height * scaleY,
-            top: box.top_left[1] * scaleY + verticalPadding,
-            left: box.top_left[0] * scaleX + horizontalPadding,
-          };
-
-          // Calculate available space on each side
-          const spaceLeft = scaledBox.left;
-          const spaceRight =
-            containerRect.width - (scaledBox.left + scaledBox.width);
-          const spaceTop = scaledBox.top;
-
-          // Determine label position based on available space
-          // Try left/right first, then fallback to top/bottom if necessary
-          const labelWidth = 200; // max-w-[200px] from the className
-          const labelHeight = 32; // Approximate height of the label
-          const padding = 8; // Padding between box and label
-
-          let labelPosition: "left" | "right" | "top" | "bottom";
-
-          if (spaceLeft >= labelWidth + padding) {
-            labelPosition = "left";
-          } else if (spaceRight >= labelWidth + padding) {
-            labelPosition = "right";
-          } else if (spaceTop >= labelHeight + padding) {
-            labelPosition = "top";
-          } else {
-            labelPosition = "bottom";
-          }
-
-          return (
-            <div key={index} onClick={() => handleBoundingBoxClick(headline)}>
-              {/* Bounding box */}
-              <div
-                className="absolute border-2 border-primary/50 bg-primary/10 hover:bg-green-500/20 hover:border-green-500/50 transition-all"
-                style={{
-                  width: scaledBox.width,
-                  height: scaledBox.height,
-                  top: scaledBox.top,
-                  left: scaledBox.left,
-                }}
-              />
-
-              {/* Variant text */}
-              <div
-                className={`absolute px-2 py-1 bg-background/90 text-xs border rounded shadow-sm max-w-[200px] whitespace-normal`}
-                style={{
-                  ...{
-                    left:
-                      labelPosition === "left"
-                        ? scaledBox.left - labelWidth - padding
-                        : labelPosition === "right"
-                        ? scaledBox.left + scaledBox.width + padding
-                        : scaledBox.left,
-                    top:
-                      labelPosition === "top"
-                        ? scaledBox.top - labelHeight - padding
-                        : labelPosition === "bottom"
-                        ? scaledBox.top + scaledBox.height + padding
-                        : scaledBox.top +
-                          scaledBox.height / 2 -
-                          labelHeight / 2,
-                    width:
-                      labelPosition === "left" || labelPosition === "right"
-                        ? labelWidth
-                        : undefined,
-                    minHeight: labelHeight,
-                    height: "auto",
-                  },
-                }}
-              >
-                {headline.text}
-              </div>
-            </div>
-          );
-        })}
-    </div>
-  );
 };
 
 // Update the headline variants type
@@ -1058,6 +658,123 @@ export default function Automations() {
     }
   };
 
+  const automations = [
+    {
+      id: "auto-1",
+      prompt: "Generate variants of our Instagram display ads for athleisure",
+      status: "in_progress",
+      created_at: "2024-03-11T14:30:00Z",
+      results: 17,
+      type: "variant_generation",
+      category: "Social Media Ads",
+      sources: ["Meta Ads Manager", "Semrush", "Shopify"],
+      channels: ["Instagram", "Facebook"]
+    },
+    {
+      id: "auto-2",
+      prompt: "Personalize homepage hero section based on user behavior",
+      status: "active",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 3,
+      type: "website_personalization",
+      category: "Homepage",
+      sources: ["Google Analytics", "Segment", "Hubspot"],
+      channels: ["Website"]
+    },
+    {
+      id: "auto-3",
+      prompt: "Cart abandonment email sequence optimization",
+      status: "scheduled",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 5,
+      type: "email_followup",
+      category: "Cart Recovery",
+      sources: ["Klaviyo", "Shopify", "Segment"],
+      channels: ["Email"]
+    },
+    {
+      id: "auto-4",
+      prompt: "Generate Facebook ad creative for holiday sale",
+      status: "active",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 15,
+      type: "variant_generation",
+      category: "Social Media Ads",
+      sources: ["Meta Ads Manager", "Shopify", "Hubspot"],
+      channels: ["Facebook", "Instagram"]
+    },
+    {
+      id: "auto-5",
+      prompt: "Product recommendation personalization for returning customers",
+      status: "active",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 7,
+      type: "website_personalization",
+      category: "Product Recommendations",
+      sources: ["Shopify", "Segment", "Google Analytics"],
+      channels: ["Website", "Email"]
+    },
+    {
+      id: "auto-6",
+      prompt: "Post-purchase follow-up email sequence",
+      status: "scheduled",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 4,
+      type: "email_followup",
+      category: "Customer Retention",
+      sources: ["Klaviyo", "Shopify", "Hubspot"],
+      channels: ["Email"]
+    },
+    {
+      id: "auto-7",
+      prompt: "Landing page content personalization by traffic source",
+      status: "active",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 4,
+      type: "website_personalization",
+      category: "Landing Pages",
+      sources: ["Google Analytics", "Hubspot", "Optimizely"],
+      channels: ["Website"]
+    },
+    {
+      id: "auto-8",
+      prompt: "Generate Google Ads headline combinations for B2B software",
+      status: "active",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 18,
+      type: "variant_generation",
+      category: "Search Ads",
+      sources: ["Google Ads", "Semrush", "Hubspot"],
+      channels: ["Google Search", "Google Display"]
+    },
+    {
+      id: "auto-9",
+      prompt: "Browse abandonment email recovery sequence",
+      status: "failed",
+      created_at: "2024-03-11T09:15:00Z",
+      results: 0,
+      type: "email_followup",
+      category: "Browse Recovery",
+      sources: ["Klaviyo", "Segment", "Shopify"],
+      channels: ["Email"]
+    }
+  ];
+
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    }).format(date);
+  };
+
+  const [selectedAutomation, setSelectedAutomation] = useState<string | null>(null);
+
+  const handleAutomationClick = (automationId: string) => {
+    setSelectedAutomation(automationId);
+  };
+
   return (
     <div className="bg-background overflow-hidden overflow-y-clip overscroll-y-none">
       <div className="max-w-[1600px] mx-auto p-4">
@@ -1068,17 +785,29 @@ export default function Automations() {
           onValueChange={(value) => setActiveTab(value)}
         >
           <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold">
+            <div className="flex items-center gap-2">
+              {/* <h1 className="text-2xl font-semibold">
                 {activeTab === "automations"
                   ? "Automation Builder"
                   : "Company Rules"}
-              </h1>
-              <p className="text-muted-foreground text-sm">
-                {activeTab === "automations"
-                  ? "Create and manage automated workflows for your ad campaigns"
-                  : "Define guidelines and constraints for your automation workflows"}
-              </p>
+              </h1> */}
+              {activeTab === "automations" && selectedAutomation !== null && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none"
+                  onClick={() => setSelectedAutomation(null)}
+                >
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </Button>
+              )}
+              {selectedAutomation == null && (
+                <p className="text-muted-foreground text-sm">
+                  {activeTab === "automations"
+                    ? "Create and manage automated workflows for your ad campaigns"
+                    : "Define guidelines and constraints for your automation workflows"}
+                </p>
+              )}
             </div>
 
             <TabsList className="bg-transparent space-x-2 relative">
@@ -1171,1218 +900,197 @@ export default function Automations() {
           </div>
 
           {/* Automations Tab Content */}
-          <TabsContent value="automations" className="mt-0 border">
+          <TabsContent value="automations" className="mt-0 border-none">
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.3 }}
             >
-              <div
-                className="w-full flex overflow-hidden box-border"
-                style={{
-                  height: "calc(100vh - 140px)",
-                  margin: 0,
-                  padding: 0,
-                }}
-              >
-                {/* Left Panel - Ad Library */}
-                <div className="w-72 h-full border-r flex flex-col overflow-hidden box-border">
-                  {/* Header */}
-                  <div
-                    className="px-6 py-4 bg-card shrink-0 box-border"
-                    style={{ height: "73px" }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="text-xl">Ad Library</CardTitle>
-                        <CardDescription>
-                          {adVariants.length > 0
-                            ? `${adVariants.length} ads available`
-                            : "Browse available ads"}
-                        </CardDescription>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        title="Create Automation"
+
+              {selectedAutomation == null && (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    {automations.map((automation) => (
+                      <motion.div
+                        key={automation.id}
+                        className="border bg-muted/50 p-4 hover:bg-muted/60 transition-colors cursor-pointer"
+                        whileHover={{ y: -1 }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.2 }}
                       >
-                        <Settings className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
+                        <div className="flex items-center justify-between" onClick={() => handleAutomationClick(automation.id)}>
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <div className="text-sm font-medium">{automation.prompt}</div>
+                              <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  <span>{formatDate(automation.created_at)}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {automation.type === 'variant_generation' ? (
+                                    <>
+                                      <LayoutGrid className="h-3 w-3" />
+                                      <span>{automation.results} variants</span>
+                                    </>
+                                  ) : automation.type === 'website_personalization' ? (
+                                    <>
+                                      <Users className="h-3 w-3" />
+                                      <span>{automation.results} segments</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Mail className="h-3 w-3" />
+                                      <span>{automation.results} emails</span>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Tag className="h-3 w-3" />
+                                  <span>{automation.category}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-6 mt-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-muted-foreground">Sources:</span>
+                                  <div className="flex gap-2">
+                                    {automation.sources.map((source, index) => {
+                                      const sourceUrl = source === "Meta Ads Manager" ? "https://business.facebook.com"
+                                        : source === "Semrush" ? "https://www.semrush.com"
+                                          : source === "Shopify" ? "https://www.shopify.com"
+                                            : source === "Google Analytics" ? "https://analytics.google.com"
+                                              : source === "Segment" ? "https://segment.com"
+                                                : source === "Hubspot" ? "https://www.hubspot.com"
+                                                  : source === "Klaviyo" ? "https://www.klaviyo.com"
+                                                    : source === "Optimizely" ? "https://www.optimizely.com"
+                                                      : source === "Google Ads" ? "https://ads.google.com"
+                                                        : "";
 
-                  <Separator className="shrink-0" />
+                                      return (
+                                        <span key={index} className="px-2 py-1 bg-muted text-xs rounded-sm flex items-center gap-1.5">
+                                          {sourceUrl && (
+                                            <div className="w-4 h-4 rounded-sm overflow-hidden bg-muted flex items-center justify-center">
+                                              <img
+                                                src={`https://www.google.com/s2/favicons?domain=${sourceUrl}&sz=32`}
+                                                alt={source}
+                                                className="w-full h-full object-contain"
+                                                onError={(e) => {
+                                                  const target = e.target as HTMLImageElement;
+                                                  target.style.display = 'none';
+                                                  target.parentElement!.innerHTML = source.charAt(0);
+                                                  target.parentElement!.style.display = 'flex';
+                                                  target.parentElement!.style.alignItems = 'center';
+                                                  target.parentElement!.style.justifyContent = 'center';
+                                                  target.parentElement!.style.backgroundColor = '#f0f0f0';
+                                                  target.parentElement!.style.color = '#333';
+                                                }}
+                                              />
+                                            </div>
+                                          )}
+                                          {source}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-muted-foreground">Channels:</span>
+                                  <div className="flex gap-2">
+                                    {automation.channels.map((channel, index) => {
+                                      const channelUrl = channel === "Instagram" ? "https://www.instagram.com"
+                                        : channel === "Facebook" ? "https://www.facebook.com"
+                                          : channel === "Website" ? "https://www.shopify.com"
+                                            : channel === "Email" ? "https://www.gmail.com"
+                                              : channel === "Google Search" ? "https://www.google.com"
+                                                : channel === "Google Display" ? "https://www.google.com"
+                                                  : "";
 
-                  {/* Scrollable Content */}
-                  <div
-                    className="overflow-hidden box-border"
-                    style={{
-                      height: "calc(100% - 73px)",
-                      padding: "8px",
-                    }}
-                  >
-                    <ScrollArea className="h-full">
-                      {isLoading ? (
-                        <div className="flex justify-center items-center py-20">
-                          <div className="flex flex-col items-center gap-2">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
-                            <span className="text-sm text-muted-foreground">
-                              Loading ads...
-                            </span>
-                          </div>
-                        </div>
-                      ) : error ? (
-                        <div className="px-2 py-6">
-                          <div className="bg-destructive/10 p-4 rounded-md text-destructive text-sm">
-                            <div className="font-medium mb-1">
-                              Error loading ads
+                                      return (
+                                        <span key={index} className="px-2 py-1 bg-muted text-xs rounded-sm flex items-center gap-1.5">
+                                          {channelUrl && (
+                                            <div className="w-4 h-4 rounded-sm overflow-hidden bg-muted flex items-center justify-center">
+                                              <img
+                                                src={`https://www.google.com/s2/favicons?domain=${channelUrl}&sz=32`}
+                                                alt={channel}
+                                                className="w-full h-full object-contain"
+                                                onError={(e) => {
+                                                  const target = e.target as HTMLImageElement;
+                                                  target.style.display = 'none';
+                                                  target.parentElement!.innerHTML = channel.charAt(0);
+                                                  target.parentElement!.style.display = 'flex';
+                                                  target.parentElement!.style.alignItems = 'center';
+                                                  target.parentElement!.style.justifyContent = 'center';
+                                                  target.parentElement!.style.backgroundColor = '#f0f0f0';
+                                                  target.parentElement!.style.color = '#333';
+                                                }}
+                                              />
+                                            </div>
+                                          )}
+                                          {channel}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                            <p className="text-destructive/80 text-xs mb-3">
-                              {error}
-                            </p>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={fetchAdVariants}
-                              className="w-full"
-                            >
-                              Retry
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 text-xs rounded-sm ${automation.status === "active"
+                              ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                              : automation.status === "in_progress"
+                                ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                                : automation.status === "scheduled"
+                                  ? "bg-orange-500/10 text-orange-700 dark:text-orange-400"
+                                  : "bg-red-500/10 text-red-700 dark:text-red-400"
+                              }`}>
+                              {automation.status}
+                            </span>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-sm">
+                              <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
-                      ) : adVariants.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                          <CircleX className="h-10 w-10 text-muted-foreground/60 mb-3" />
-                          <h3 className="text-lg font-medium mb-1">
-                            No ad variants found
-                          </h3>
-                          <p className="text-muted-foreground text-sm max-w-xs">
-                            There are no ads available in your library at the
-                            moment.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-3 gap-2 p-2">
-                          {adVariants.map((item, index) => (
-                            <div key={item.mr_id}>
-                              <div
-                                className={`p-1 rounded-md transition-colors ${
-                                  selectedAdIndex === index
-                                    ? "bg-primary/10"
-                                    : "hover:bg-muted"
-                                }`}
-                              >
-                                <AdImage
-                                  src={item.mr_image_url}
-                                  alt={item.li_name || "Ad variant"}
-                                  className="w-full"
-                                  isSelected={selectedAdIndex === index}
-                                  onClick={() => setSelectedAdIndex(index)}
-                                  preserveAspectRatio={true}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </ScrollArea>
+                      </motion.div>
+                    ))}
                   </div>
+
+                  <Button variant="outline" className="w-full border-dashed gap-1 rounded-none" size="sm">
+                    <Plus className="h-4 w-4" />
+                    <span>New Automation</span>
+                  </Button>
                 </div>
+              )}
 
-                {/* Right Panel - Detail View */}
-                <div className="flex-1 h-full flex flex-col overflow-hidden box-border">
-                  <div
-                    className="px-6 py-4 bg-card shrink-0 box-border"
-                    style={{ height: "73px" }}
-                  >
-                    <CardTitle className="text-xl">
-                      {selectedAd ? "Ad Details" : "Automations"}
-                    </CardTitle>
-                  </div>
 
-                  <Separator className="shrink-0" />
 
-                  <div
-                    className="overflow-hidden box-border"
-                    style={{
-                      height: "calc(100% - 74px)",
-                      padding: "24px",
-                    }}
-                  >
-                    <ScrollArea className="h-full">
-                      {selectedAd ? (
-                        <div className="space-y-8">
-                          {/* Ad Preview */}
-                          <div className="space-y-4">
-                            <h3 className="text-sm font-medium">Ad Preview</h3>
-                            <div className="w-full flex items-center justify-center border rounded-lg">
-                              <AdImage
-                                src={selectedAd.mr_image_url}
-                                alt="Ad preview"
-                                className="w-full max-w-[600px]"
-                                preserveAspectRatio={false}
-                              />
-                            </div>
-                          </div>
-
-                          {/* Generated Variants Section */}
-                          {headlineVariants.filter(
-                            (variant) =>
-                              variant.image_url === selectedAd.mr_image_url
-                          ).length > 0 && (
-                            <div className="space-y-4">
-                              <h3 className="text-sm font-medium">
-                                Generated Variants
-                              </h3>
-
-                              {/* Table View */}
-                              <Card>
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableHead className="w-[100px]">
-                                        Variant
-                                      </TableHead>
-                                      {headlineVariants
-                                        .filter(
-                                          (variant) =>
-                                            variant.image_url ===
-                                            selectedAd.mr_image_url
-                                        )
-                                        .slice(0, 1)
-                                        .map((firstVariant) =>
-                                          firstVariant.original_headlines.map(
-                                            (_, index) => (
-                                              <TableHead key={index}>
-                                                Headline {index + 1}
-                                              </TableHead>
-                                            )
-                                          )
-                                        )}
-                                      <TableHead className="text-right">
-                                        Success
-                                      </TableHead>
-                                      <TableHead className="text-right">
-                                        CTR
-                                      </TableHead>
-                                      <TableHead className="text-right">
-                                        Metrics
-                                      </TableHead>
-                                      <TableHead className="w-[50px]"></TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {/* Original Headlines Row */}
-                                    {headlineVariants
-                                      .filter(
-                                        (variant) =>
-                                          variant.image_url ===
-                                          selectedAd.mr_image_url
-                                      )
-                                      .slice(0, 1)
-                                      .map((firstVariant) => (
-                                        <TableRow key="original">
-                                          <TableCell className="font-medium">
-                                            Original
-                                          </TableCell>
-                                          {firstVariant.original_headlines.map(
-                                            (headline, index) => (
-                                              <TableCell key={index}>
-                                                <div className="space-y-1">
-                                                  <p>{headline.text}</p>
-                                                  <span className="text-xs text-muted-foreground">
-                                                    {headline.type}
-                                                  </span>
-                                                </div>
-                                              </TableCell>
-                                            )
-                                          )}
-                                          {originalMetrics && (
-                                            <>
-                                              <TableCell>
-                                                {/* Skip success likelihood for original metrics */}
-                                              </TableCell>
-                                              <TableCell>
-                                                <div className="flex items-center gap-2">
-                                                  <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
-                                                    <div
-                                                      className={cn(
-                                                        "h-full transition-all",
-                                                        originalMetrics.ctr >=
-                                                          0.05
-                                                          ? "bg-green-500"
-                                                          : originalMetrics.ctr >=
-                                                            0.02
-                                                          ? "bg-yellow-500"
-                                                          : "bg-red-500"
-                                                      )}
-                                                      style={{
-                                                        width: `${
-                                                          originalMetrics.ctr *
-                                                          1000
-                                                        }%`,
-                                                      }}
-                                                    />
-                                                  </div>
-                                                  <span
-                                                    className={cn(
-                                                      "text-xs tabular-nums font-medium",
-                                                      originalMetrics.ctr >=
-                                                        0.05
-                                                        ? "text-green-600"
-                                                        : originalMetrics.ctr >=
-                                                          0.02
-                                                        ? "text-yellow-600"
-                                                        : "text-red-600"
-                                                    )}
-                                                  >
-                                                    {(
-                                                      originalMetrics.ctr * 100
-                                                    ).toFixed(2)}
-                                                    %
-                                                  </span>
-                                                </div>
-                                              </TableCell>
-                                              <TableCell>
-                                                <div className="space-y-1.5">
-                                                  <div className="flex items-center gap-2">
-                                                    <Eye className="h-3 w-3 text-blue-500" />
-                                                    <span className="text-xs tabular-nums font-medium text-blue-600">
-                                                      {formatCompactNumber(
-                                                        originalMetrics.impressions
-                                                      )}
-                                                    </span>
-                                                  </div>
-                                                  <div className="flex items-center gap-2">
-                                                    <MousePointerClick className="h-3 w-3 text-violet-500" />
-                                                    <span className="text-xs tabular-nums font-medium text-violet-600">
-                                                      {formatCompactNumber(
-                                                        originalMetrics.clicks
-                                                      )}
-                                                    </span>
-                                                  </div>
-                                                  <div className="flex items-center gap-2">
-                                                    <Target className="h-3 w-3 text-green-500" />
-                                                    <span className="text-xs tabular-nums font-medium text-green-600">
-                                                      {formatCompactNumber(
-                                                        originalMetrics.conversions
-                                                      )}
-                                                    </span>
-                                                  </div>
-                                                </div>
-                                              </TableCell>
-                                            </>
-                                          )}
-                                        </TableRow>
-                                      ))}
-
-                                    {/* Variant Rows */}
-                                    {headlineVariants
-                                      .filter(
-                                        (variant) =>
-                                          variant.image_url ===
-                                          selectedAd.mr_image_url
-                                      )
-                                      .map((variant, variantIndex) => (
-                                        <TableRow
-                                          key={variant.id}
-                                          className="cursor-pointer hover:bg-muted/50"
-                                          onClick={() =>
-                                            setSelectedVariant(variant)
-                                          }
-                                        >
-                                          <TableCell className="font-medium">
-                                            Variant {variantIndex + 1}
-                                          </TableCell>
-                                          {variant.new_headlines.map(
-                                            (headline, index) => (
-                                              <TableCell key={index}>
-                                                <div className="space-y-1">
-                                                  <p>{headline.text}</p>
-                                                  <span className="text-xs text-muted-foreground">
-                                                    {headline.type}
-                                                  </span>
-                                                </div>
-                                              </TableCell>
-                                            )
-                                          )}
-                                          <TableCell>
-                                            <div className="flex items-center gap-2">
-                                              <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
-                                                <div
-                                                  className={cn(
-                                                    "h-full transition-all",
-                                                    variant
-                                                      .overall_success_likelihood
-                                                      .metric >= 75
-                                                      ? "bg-green-500"
-                                                      : variant
-                                                          .overall_success_likelihood
-                                                          .metric >= 50
-                                                      ? "bg-yellow-500"
-                                                      : "bg-red-500"
-                                                  )}
-                                                  style={{
-                                                    width: `${
-                                                      variant
-                                                        .overall_success_likelihood
-                                                        .metric || 0
-                                                    }%`,
-                                                  }}
-                                                />
-                                              </div>
-                                              <TooltipProvider>
-                                                <Tooltip>
-                                                  <TooltipTrigger asChild>
-                                                    <span
-                                                      className={cn(
-                                                        "text-xs tabular-nums font-medium cursor-help",
-                                                        variant
-                                                          .overall_success_likelihood
-                                                          .metric >= 75
-                                                          ? "text-green-600"
-                                                          : variant
-                                                              .overall_success_likelihood
-                                                              .metric >= 50
-                                                          ? "text-yellow-600"
-                                                          : "text-red-600"
-                                                      )}
-                                                    >
-                                                      {variant.overall_success_likelihood.metric?.toFixed(
-                                                        1
-                                                      )}
-                                                      %
-                                                    </span>
-                                                  </TooltipTrigger>
-                                                  <TooltipContent
-                                                    side="top"
-                                                    className="max-w-[300px] p-3"
-                                                  >
-                                                    <ReactMarkdown>
-                                                      {
-                                                        variant
-                                                          .overall_success_likelihood
-                                                          .reason
-                                                      }
-                                                    </ReactMarkdown>
-                                                  </TooltipContent>
-                                                </Tooltip>
-                                              </TooltipProvider>
-                                            </div>
-                                          </TableCell>
-                                          <TableCell>
-                                            <div className="flex items-center gap-2">
-                                              <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
-                                                <div
-                                                  className={cn(
-                                                    "h-full transition-all",
-                                                    variant.predicted_ctr
-                                                      .metric >= 5
-                                                      ? "bg-green-500"
-                                                      : variant.predicted_ctr
-                                                          .metric >= 2
-                                                      ? "bg-yellow-500"
-                                                      : "bg-red-500"
-                                                  )}
-                                                  style={{
-                                                    width: `${
-                                                      variant.predicted_ctr
-                                                        .metric * 10 || 0
-                                                    }%`,
-                                                  }}
-                                                />
-                                              </div>
-                                              <TooltipProvider>
-                                                <Tooltip>
-                                                  <TooltipTrigger asChild>
-                                                    <span
-                                                      className={cn(
-                                                        "text-xs tabular-nums font-medium cursor-help",
-                                                        variant.predicted_ctr
-                                                          .metric >= 5
-                                                          ? "text-green-600"
-                                                          : variant
-                                                              .predicted_ctr
-                                                              .metric >= 2
-                                                          ? "text-yellow-600"
-                                                          : "text-red-600"
-                                                      )}
-                                                    >
-                                                      {variant.predicted_ctr.metric?.toFixed(
-                                                        2
-                                                      )}
-                                                      %
-                                                    </span>
-                                                  </TooltipTrigger>
-                                                  <TooltipContent
-                                                    side="top"
-                                                    className="max-w-[300px] p-3"
-                                                  >
-                                                    <ReactMarkdown>
-                                                      {
-                                                        variant.predicted_ctr
-                                                          .reason
-                                                      }
-                                                    </ReactMarkdown>
-                                                  </TooltipContent>
-                                                </Tooltip>
-                                              </TooltipProvider>
-                                            </div>
-                                          </TableCell>
-                                          <TableCell>
-                                            <div className="space-y-1.5">
-                                              <div className="flex items-center gap-2">
-                                                <Eye className="h-3 w-3 text-blue-500" />
-                                                <TooltipProvider>
-                                                  <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                      <span className="text-xs tabular-nums font-medium text-blue-600 cursor-help">
-                                                        {formatCompactNumber(
-                                                          variant
-                                                            .predicted_impressions
-                                                            .metric
-                                                        )}
-                                                      </span>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent
-                                                      side="top"
-                                                      className="max-w-[300px] p-3"
-                                                    >
-                                                      <ReactMarkdown>
-                                                        {
-                                                          variant
-                                                            .predicted_impressions
-                                                            .reason
-                                                        }
-                                                      </ReactMarkdown>
-                                                    </TooltipContent>
-                                                  </Tooltip>
-                                                </TooltipProvider>
-                                              </div>
-                                              <div className="flex items-center gap-2">
-                                                <MousePointerClick className="h-3 w-3 text-violet-500" />
-                                                <TooltipProvider>
-                                                  <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                      <span className="text-xs tabular-nums font-medium text-violet-600 cursor-help">
-                                                        {formatCompactNumber(
-                                                          variant
-                                                            .predicted_clicks
-                                                            .metric
-                                                        )}
-                                                      </span>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent
-                                                      side="top"
-                                                      className="max-w-[300px] p-3"
-                                                    >
-                                                      <ReactMarkdown>
-                                                        {
-                                                          variant
-                                                            .predicted_clicks
-                                                            .reason
-                                                        }
-                                                      </ReactMarkdown>
-                                                    </TooltipContent>
-                                                  </Tooltip>
-                                                </TooltipProvider>
-                                              </div>
-                                              <div className="flex items-center gap-2">
-                                                <Target className="h-3 w-3 text-green-500" />
-                                                <TooltipProvider>
-                                                  <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                      <span className="text-xs tabular-nums font-medium text-green-600 cursor-help">
-                                                        {formatCompactNumber(
-                                                          variant
-                                                            .predicted_conversions
-                                                            .metric
-                                                        )}
-                                                      </span>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent
-                                                      side="top"
-                                                      className="max-w-[300px] p-3"
-                                                    >
-                                                      <ReactMarkdown>
-                                                        {
-                                                          variant
-                                                            .predicted_conversions
-                                                            .reason
-                                                        }
-                                                      </ReactMarkdown>
-                                                    </TooltipContent>
-                                                  </Tooltip>
-                                                </TooltipProvider>
-                                              </div>
-                                            </div>
-                                          </TableCell>
-                                          <TableCell>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setVariantToDelete(variant);
-                                              }}
-                                            >
-                                              <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                          </TableCell>
-                                        </TableRow>
-                                      ))}
-                                  </TableBody>
-                                </Table>
-                              </Card>
-
-                              {/* Variant Details Dialog */}
-                              <Dialog
-                                open={!!selectedVariant}
-                                onOpenChange={(open) =>
-                                  !open && setSelectedVariant(null)
-                                }
-                              >
-                                <DialogContent className="max-w-4xl max-h-[90dvh] flex flex-col overflow-hidden p-0">
-                                  <DialogHeader className="px-6 py-4 border-b bg-background">
-                                    <DialogTitle>Variant Details</DialogTitle>
-                                    <DialogDescription>
-                                      Detailed information about the selected
-                                      headline variant
-                                    </DialogDescription>
-                                  </DialogHeader>
-
-                                  <div className="flex-1 overflow-y-auto">
-                                    <div className="px-6 py-6">
-                                      {selectedVariant && (
-                                        <div className="space-y-8">
-                                          {/* Ad Preview */}
-                                          <div className="space-y-4">
-                                            <h3 className="text-sm font-medium">
-                                              Ad Preview
-                                            </h3>
-                                            <AdImage
-                                              src={selectedVariant.image_url}
-                                              alt="Ad preview"
-                                              className="w-full"
-                                              preserveAspectRatio={false}
-                                              new_headlines={
-                                                selectedVariant.new_headlines
-                                              }
-                                              handleBoundingBoxClick={(
-                                                headline
-                                              ) => {
-                                                // Find the index of the clicked headline
-                                                const index =
-                                                  selectedVariant.new_headlines.findIndex(
-                                                    (h) =>
-                                                      h.text === headline.text
-                                                  );
-                                                if (index !== -1) {
-                                                  setCurrentHeadlineIndex(
-                                                    index
-                                                  );
-                                                }
-                                              }}
-                                            />
-                                          </div>
-
-                                          {/* Headlines Comparison with Pagination */}
-                                          <div className="space-y-4">
-                                            <div className="flex items-center justify-between">
-                                              <h3 className="text-sm font-medium">
-                                                Headlines Comparison
-                                              </h3>
-                                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                                <span>
-                                                  {currentHeadlineIndex + 1} of{" "}
-                                                  {
-                                                    selectedVariant
-                                                      .new_headlines.length
-                                                  }
-                                                </span>
-                                                <div className="flex items-center gap-1">
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8"
-                                                    disabled={
-                                                      currentHeadlineIndex === 0
-                                                    }
-                                                    onClick={() =>
-                                                      setCurrentHeadlineIndex(
-                                                        (prev) => prev - 1
-                                                      )
-                                                    }
-                                                  >
-                                                    <ChevronLeft className="h-4 w-4" />
-                                                  </Button>
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8"
-                                                    disabled={
-                                                      currentHeadlineIndex ===
-                                                      selectedVariant
-                                                        .new_headlines.length -
-                                                        1
-                                                    }
-                                                    onClick={() =>
-                                                      setCurrentHeadlineIndex(
-                                                        (prev) => prev + 1
-                                                      )
-                                                    }
-                                                  >
-                                                    <ChevronRight className="h-4 w-4" />
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                            </div>
-
-                                            {/* Current Headline Card */}
-                                            <Card className="p-4">
-                                              <div className="space-y-4">
-                                                <div className="grid grid-cols-2 gap-4">
-                                                  <div>
-                                                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                                      Original Headline
-                                                    </h4>
-                                                    <div className="p-3 rounded-md bg-muted/50">
-                                                      <p className="text-sm">
-                                                        {
-                                                          selectedVariant
-                                                            .new_headlines[
-                                                            currentHeadlineIndex
-                                                          ].original
-                                                        }
-                                                      </p>
-                                                      <span className="text-xs text-muted-foreground mt-1 block">
-                                                        {
-                                                          selectedVariant
-                                                            .original_headlines[
-                                                            currentHeadlineIndex
-                                                          ]?.type
-                                                        }
-                                                      </span>
-                                                    </div>
-                                                  </div>
-                                                  <div>
-                                                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                                      New Headline
-                                                    </h4>
-                                                    <div className="p-3 rounded-md bg-primary/5 border-primary/10 border">
-                                                      <p className="text-sm">
-                                                        {
-                                                          selectedVariant
-                                                            .new_headlines[
-                                                            currentHeadlineIndex
-                                                          ].text
-                                                        }
-                                                      </p>
-                                                      <span className="text-xs text-muted-foreground mt-1 block">
-                                                        {
-                                                          selectedVariant
-                                                            .new_headlines[
-                                                            currentHeadlineIndex
-                                                          ].type
-                                                        }
-                                                      </span>
-                                                    </div>
-                                                  </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-4 pt-4">
-                                                  <div className="space-y-3">
-                                                    <div>
-                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                                        Improvements
-                                                      </h4>
-                                                      <ul className="list-disc list-inside space-y-1">
-                                                        {selectedVariant.new_headlines[
-                                                          currentHeadlineIndex
-                                                        ].improvements.map(
-                                                          (improvement, i) => (
-                                                            <li
-                                                              key={i}
-                                                              className="text-sm"
-                                                            >
-                                                              {improvement}
-                                                            </li>
-                                                          )
-                                                        )}
-                                                      </ul>
-                                                    </div>
-                                                    <div>
-                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                                        Expected Impact
-                                                      </h4>
-                                                      <ul className="list-disc list-inside space-y-1">
-                                                        {selectedVariant.new_headlines[
-                                                          currentHeadlineIndex
-                                                        ].expected_impact.map(
-                                                          (impact, i) => (
-                                                            <li
-                                                              key={i}
-                                                              className="text-sm"
-                                                            >
-                                                              {impact}
-                                                            </li>
-                                                          )
-                                                        )}
-                                                      </ul>
-                                                    </div>
-                                                  </div>
-                                                  <div className="space-y-3">
-                                                    <div>
-                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                                        Target Audience
-                                                      </h4>
-                                                      <ul className="list-disc list-inside space-y-1">
-                                                        {selectedVariant.new_headlines[
-                                                          currentHeadlineIndex
-                                                        ].target_audience.map(
-                                                          (audience, i) => (
-                                                            <li
-                                                              key={i}
-                                                              className="text-sm"
-                                                            >
-                                                              {audience}
-                                                            </li>
-                                                          )
-                                                        )}
-                                                      </ul>
-                                                    </div>
-                                                    <div>
-                                                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                                        Pain Points Addressed
-                                                      </h4>
-                                                      <ul className="list-disc list-inside space-y-1">
-                                                        {selectedVariant.new_headlines[
-                                                          currentHeadlineIndex
-                                                        ].pain_points_addressed.map(
-                                                          (point, i) => (
-                                                            <li
-                                                              key={i}
-                                                              className="text-sm"
-                                                            >
-                                                              {point}
-                                                            </li>
-                                                          )
-                                                        )}
-                                                      </ul>
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            </Card>
-                                          </div>
-
-                                          {/* Performance Metrics Section */}
-                                          <div className="space-y-6">
-                                            <div>
-                                              <h3 className="text-lg font-medium mb-4">
-                                                Performance Metrics
-                                              </h3>
-                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {/* Success Likelihood */}
-                                                <Card className="p-6 relative overflow-hidden">
-                                                  <div className="relative z-10">
-                                                    <div className="flex items-center justify-between mb-4">
-                                                      <div className="space-y-1">
-                                                        <h4 className="text-sm font-medium">
-                                                          Success Likelihood
-                                                        </h4>
-                                                        <p className="text-xs text-muted-foreground">
-                                                          Predicted success rate
-                                                        </p>
-                                                      </div>
-                                                      <div
-                                                        className={cn(
-                                                          "px-2.5 py-0.5 rounded-full text-xs font-semibold",
-                                                          selectedVariant
-                                                            .overall_success_likelihood
-                                                            .metric >= 75
-                                                            ? "bg-green-500/10 text-green-700"
-                                                            : selectedVariant
-                                                                .overall_success_likelihood
-                                                                .metric >= 50
-                                                            ? "bg-yellow-500/10 text-yellow-700"
-                                                            : "bg-red-500/10 text-red-700"
-                                                        )}
-                                                      >
-                                                        {selectedVariant.overall_success_likelihood.metric.toFixed(
-                                                          1
-                                                        )}
-                                                        %
-                                                      </div>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                                                        <div
-                                                          className={cn(
-                                                            "h-full transition-all",
-                                                            selectedVariant
-                                                              .overall_success_likelihood
-                                                              .metric >= 75
-                                                              ? "bg-green-500"
-                                                              : selectedVariant
-                                                                  .overall_success_likelihood
-                                                                  .metric >= 50
-                                                              ? "bg-yellow-500"
-                                                              : "bg-red-500"
-                                                          )}
-                                                          style={{
-                                                            width: `${selectedVariant.overall_success_likelihood.metric}%`,
-                                                          }}
-                                                        />
-                                                      </div>
-                                                      <div className="text-sm text-muted-foreground">
-                                                        <ReactMarkdown
-                                                          remarkPlugins={[
-                                                            remarkGfm,
-                                                          ]}
-                                                          className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
-                                                        >
-                                                          {
-                                                            selectedVariant
-                                                              .overall_success_likelihood
-                                                              .reason
-                                                          }
-                                                        </ReactMarkdown>
-                                                      </div>
-                                                    </div>
-                                                  </div>
-                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-muted/50 to-transparent opacity-50" />
-                                                </Card>
-
-                                                {/* CTR */}
-                                                <Card className="p-6 relative overflow-hidden">
-                                                  <div className="relative z-10">
-                                                    <div className="flex items-center justify-between mb-4">
-                                                      <div className="space-y-1">
-                                                        <h4 className="text-sm font-medium">
-                                                          Click-Through Rate
-                                                        </h4>
-                                                        <p className="text-xs text-muted-foreground">
-                                                          Predicted engagement
-                                                        </p>
-                                                      </div>
-                                                      <div
-                                                        className={cn(
-                                                          "px-2.5 py-0.5 rounded-full text-xs font-semibold",
-                                                          selectedVariant
-                                                            .predicted_ctr
-                                                            .metric >= 5
-                                                            ? "bg-green-500/10 text-green-700"
-                                                            : selectedVariant
-                                                                .predicted_ctr
-                                                                .metric >= 2
-                                                            ? "bg-yellow-500/10 text-yellow-700"
-                                                            : "bg-red-500/10 text-red-700"
-                                                        )}
-                                                      >
-                                                        {selectedVariant.predicted_ctr.metric.toFixed(
-                                                          2
-                                                        )}
-                                                        %
-                                                      </div>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                                                        <div
-                                                          className={cn(
-                                                            "h-full transition-all",
-                                                            selectedVariant
-                                                              .predicted_ctr
-                                                              .metric >= 5
-                                                              ? "bg-green-500"
-                                                              : selectedVariant
-                                                                  .predicted_ctr
-                                                                  .metric >= 2
-                                                              ? "bg-yellow-500"
-                                                              : "bg-red-500"
-                                                          )}
-                                                          style={{
-                                                            width: `${
-                                                              selectedVariant
-                                                                .predicted_ctr
-                                                                .metric * 10
-                                                            }%`,
-                                                          }}
-                                                        />
-                                                      </div>
-                                                      <div className="text-sm text-muted-foreground">
-                                                        <ReactMarkdown
-                                                          remarkPlugins={[
-                                                            remarkGfm,
-                                                          ]}
-                                                          className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
-                                                        >
-                                                          {
-                                                            selectedVariant
-                                                              .predicted_ctr
-                                                              .reason
-                                                          }
-                                                        </ReactMarkdown>
-                                                      </div>
-                                                    </div>
-                                                  </div>
-                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-muted/50 to-transparent opacity-50" />
-                                                </Card>
-
-                                                {/* Impressions */}
-                                                <Card className="p-6 relative overflow-hidden">
-                                                  <div className="relative z-10">
-                                                    <div className="flex items-center justify-between mb-4">
-                                                      <div className="space-y-1">
-                                                        <h4 className="text-sm font-medium">
-                                                          Impressions
-                                                        </h4>
-                                                        <p className="text-xs text-muted-foreground">
-                                                          Predicted reach
-                                                        </p>
-                                                      </div>
-                                                      <div className="flex items-center gap-2">
-                                                        <Eye className="h-4 w-4 text-blue-500" />
-                                                        <span className="text-sm font-semibold text-blue-700">
-                                                          {formatCompactNumber(
-                                                            selectedVariant
-                                                              .predicted_impressions
-                                                              .metric
-                                                          )}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                    <div className="text-sm text-muted-foreground">
-                                                      <ReactMarkdown
-                                                        remarkPlugins={[
-                                                          remarkGfm,
-                                                        ]}
-                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
-                                                      >
-                                                        {
-                                                          selectedVariant
-                                                            .predicted_impressions
-                                                            .reason
-                                                        }
-                                                      </ReactMarkdown>
-                                                    </div>
-                                                  </div>
-                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-blue-500/5 to-transparent opacity-50" />
-                                                </Card>
-
-                                                {/* Clicks */}
-                                                <Card className="p-6 relative overflow-hidden">
-                                                  <div className="relative z-10">
-                                                    <div className="flex items-center justify-between mb-4">
-                                                      <div className="space-y-1">
-                                                        <h4 className="text-sm font-medium">
-                                                          Clicks
-                                                        </h4>
-                                                        <p className="text-xs text-muted-foreground">
-                                                          Predicted interactions
-                                                        </p>
-                                                      </div>
-                                                      <div className="flex items-center gap-2">
-                                                        <MousePointerClick className="h-4 w-4 text-violet-500" />
-                                                        <span className="text-sm font-semibold text-violet-700">
-                                                          {formatCompactNumber(
-                                                            selectedVariant
-                                                              .predicted_clicks
-                                                              .metric
-                                                          )}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                    <div className="text-sm text-muted-foreground">
-                                                      <ReactMarkdown
-                                                        remarkPlugins={[
-                                                          remarkGfm,
-                                                        ]}
-                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
-                                                      >
-                                                        {
-                                                          selectedVariant
-                                                            .predicted_clicks
-                                                            .reason
-                                                        }
-                                                      </ReactMarkdown>
-                                                    </div>
-                                                  </div>
-                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-violet-500/5 to-transparent opacity-50" />
-                                                </Card>
-
-                                                {/* Conversions */}
-                                                <Card className="p-6 relative overflow-hidden col-span-2">
-                                                  <div className="relative z-10">
-                                                    <div className="flex items-center justify-between mb-4">
-                                                      <div className="space-y-1">
-                                                        <h4 className="text-sm font-medium">
-                                                          Conversions
-                                                        </h4>
-                                                        <p className="text-xs text-muted-foreground">
-                                                          Predicted successful
-                                                          outcomes
-                                                        </p>
-                                                      </div>
-                                                      <div className="flex items-center gap-2">
-                                                        <Target className="h-4 w-4 text-green-500" />
-                                                        <span className="text-sm font-semibold text-green-700">
-                                                          {formatCompactNumber(
-                                                            selectedVariant
-                                                              .predicted_conversions
-                                                              .metric
-                                                          )}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                    <div className="text-sm text-muted-foreground">
-                                                      <ReactMarkdown
-                                                        remarkPlugins={[
-                                                          remarkGfm,
-                                                        ]}
-                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
-                                                      >
-                                                        {
-                                                          selectedVariant
-                                                            .predicted_conversions
-                                                            .reason
-                                                        }
-                                                      </ReactMarkdown>
-                                                    </div>
-                                                  </div>
-                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-green-500/5 to-transparent opacity-50" />
-                                                </Card>
-                                              </div>
-                                            </div>
-                                          </div>
-
-                                          {/* Rules Used Section */}
-                                          <div className="space-y-4">
-                                            <div className="sticky top-0 bg-background pt-4 pb-2 -mx-6 px-6 border-b z-10">
-                                              <h3 className="text-sm font-medium">
-                                                Rules Applied
-                                              </h3>
-                                            </div>
-                                            <div className="grid grid-cols-4 gap-3">
-                                              {selectedVariant.rules_used.map(
-                                                (rule, index) => (
-                                                  <Card
-                                                    key={index}
-                                                    className="p-3"
-                                                  >
-                                                    <div className="space-y-2">
-                                                      <div className="flex items-center justify-between gap-2">
-                                                        <h4 className="text-sm font-medium">
-                                                          {rule.name}
-                                                        </h4>
-                                                        <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs">
-                                                          {rule.type}
-                                                        </span>
-                                                      </div>
-                                                      <p className="text-xs text-muted-foreground">
-                                                        {rule.description}
-                                                      </p>
-                                                    </div>
-                                                  </Card>
-                                                )
-                                              )}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="px-6 py-4 border-t bg-background mt-auto">
-                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                      <span>
-                                        Created:{" "}
-                                        {selectedVariant &&
-                                          new Date(
-                                            selectedVariant.created_at
-                                          ).toLocaleString()}
-                                      </span>
-                                      <span>
-                                        Last Updated:{" "}
-                                        {selectedVariant &&
-                                          new Date(
-                                            selectedVariant.updated_at
-                                          ).toLocaleString()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </DialogContent>
-                              </Dialog>
-                            </div>
-                          )}
-
-                          {/* Automation Actions */}
-                          <div className="space-y-4">
-                            <h3 className="text-sm font-medium">
-                              Available Automations
-                            </h3>
-                            <Card className="p-6">
-                              <div className="flex flex-col items-center justify-center text-center">
-                                <Settings className="h-12 w-12 text-muted-foreground/60 mb-4" />
-                                <h3 className="text-lg font-medium mb-2">
-                                  Create New Automation
-                                </h3>
-                                <p className="text-muted-foreground text-sm max-w-lg mb-4">
-                                  Choose an automation type to generate
-                                  optimized content for your ad.
-                                </p>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button className="gap-2">
-                                      <Plus className="h-4 w-4" />
-                                      Create Automation
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent
-                                    align="start"
-                                    className="w-64"
-                                  >
-                                    <DropdownMenuItem
-                                      className="flex items-center"
-                                      onSelect={() =>
-                                        setIsRuleSelectionOpen(true)
-                                      }
-                                    >
-                                      <Settings className="h-4 w-4 mr-2" />
-                                      Generate Headline Variants
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                            </Card>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-16 text-center">
-                          <div className="mb-4 p-6 bg-muted/20 rounded-full">
-                            <Settings className="h-12 w-12 text-muted-foreground/60" />
-                          </div>
-                          <h3 className="text-xl font-medium mb-2">
-                            No Automation Selected
-                          </h3>
-                          <p className="text-muted-foreground max-w-md">
-                            Select an automation from the list on the left to
-                            view its details and configuration.
-                          </p>
-                        </div>
-                      )}
-                    </ScrollArea>
-                  </div>
-                </div>
-              </div>
+              {selectedAutomation == "auto-1" && (
+                <VariantsDisplay
+                  adVariants={adVariants}
+                  headlineVariants={headlineVariants}
+                  originalMetrics={originalMetrics}
+                  error={error}
+                  isLoading={isLoading}
+                  selectedAdIndex={selectedAdIndex}
+                  setSelectedAdIndex={setSelectedAdIndex}
+                  selectedAd={selectedAd}
+                  selectedVariant={selectedVariant}
+                  setSelectedVariant={setSelectedVariant}
+                  fetchAdVariants={fetchAdVariants}
+                  setVariantToDelete={setVariantToDelete}
+                  currentHeadlineIndex={currentHeadlineIndex}
+                  setCurrentHeadlineIndex={setCurrentHeadlineIndex}
+                  setIsRuleSelectionOpen={setIsRuleSelectionOpen}
+                  automation={automations.find(a => a.id === selectedAutomation)!}
+                />
+              )}
             </motion.div>
           </TabsContent>
 
           {/* Rules Tab Content */}
-          <TabsContent value="rules" className="pb-8">
+          <TabsContent value="rules" className="mt-0">
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2393,16 +1101,16 @@ export default function Automations() {
                 {/* Custom Rules Section */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-lg font-semibold">Custom Rules</h2>
+                    <div className="space-y-1">
+                      <h2 className="text-lg font-medium tracking-tight">Custom Rules</h2>
                       <p className="text-sm text-muted-foreground">
-                        Define your own rules and guidelines for content
-                        generation
+                        Define your own rules and guidelines for content generation
                       </p>
                     </div>
                     <Button
-                      className="gap-2"
                       onClick={() => setIsAddRuleOpen(true)}
+                      className="gap-2 rounded-none"
+                      variant="outline"
                     >
                       <Plus className="h-4 w-4" />
                       Add Rule
@@ -2410,16 +1118,32 @@ export default function Automations() {
                   </div>
 
                   {isLoadingRules ? (
-                    <div className="flex justify-center items-center py-8">
-                      <div className="flex flex-col items-center gap-2">
-                        <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
-                        <span className="text-sm text-muted-foreground">
-                          Loading rules...
-                        </span>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                      {[...Array(8)].map((_, i) => (
+                        <div key={i} className="border bg-muted/50 p-3">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="h-8 w-8 bg-muted/50 rounded-sm animate-pulse" />
+                              <div className="h-4 flex-1 bg-muted/50 rounded-sm animate-pulse" />
+                            </div>
+                            <div className="space-y-2">
+                              <div className="h-3 w-full bg-muted/50 rounded-sm animate-pulse" />
+                              <div className="h-3 w-2/3 bg-muted/50 rounded-sm animate-pulse" />
+                            </div>
+                            <div className="space-y-2">
+                              <div className="h-4 w-16 bg-muted/50 rounded-sm animate-pulse" />
+                              <div className="flex flex-wrap gap-1">
+                                <div className="h-4 w-16 bg-muted/50 rounded-sm animate-pulse" />
+                                <div className="h-4 w-20 bg-muted/50 rounded-sm animate-pulse" />
+                                <div className="h-4 w-12 bg-muted/50 rounded-sm animate-pulse" />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : rulesError ? (
-                    <div className="bg-destructive/10 p-4 rounded-lg text-destructive text-sm">
+                    <div className="bg-destructive/10 p-4 rounded-sm text-destructive text-sm">
                       <div className="font-medium mb-1">
                         Error loading rules
                       </div>
@@ -2430,13 +1154,13 @@ export default function Automations() {
                         variant="outline"
                         size="sm"
                         onClick={fetchRules}
-                        className="w-full"
+                        className="w-full rounded-sm"
                       >
                         Retry
                       </Button>
                     </div>
                   ) : customRules.length === 0 ? (
-                    <Card className="p-6">
+                    <div className="border bg-muted/50 p-6">
                       <div className="flex flex-col items-center justify-center text-center">
                         <Settings className="h-12 w-12 text-muted-foreground/60 mb-4" />
                         <h3 className="text-lg font-medium mb-2">
@@ -2448,20 +1172,41 @@ export default function Automations() {
                         </p>
                         <Button
                           variant="outline"
-                          className="gap-2"
+                          className="gap-2 rounded-sm"
                           onClick={() => setIsAddRuleOpen(true)}
                         >
                           <Plus className="h-4 w-4" />
                           Add Your First Rule
                         </Button>
                       </div>
-                    </Card>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                       {customRules.map((rule) => (
-                        <Card key={rule.id} className="p-3">
-                          <div className="space-y-2">
+                        <motion.div
+                          key={rule.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="border bg-muted/50 p-3 group hover:bg-muted/60 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/5"
+                        >
+                          <div className="space-y-3">
                             <div className="flex items-center justify-between gap-2">
+                              <div className="p-2 bg-primary/10 rounded-sm">
+                                {rule.type === "tone" ? (
+                                  <Settings className="h-4 w-4 text-primary" />
+                                ) : rule.type === "formatting" ? (
+                                  <LayoutGrid className="h-4 w-4 text-primary" />
+                                ) : rule.type === "keyword" ? (
+                                  <Tag className="h-4 w-4 text-primary" />
+                                ) : rule.type === "compliance" ? (
+                                  <Shield className="h-4 w-4 text-primary" />
+                                ) : rule.type === "style" ? (
+                                  <Paintbrush className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <MessageSquare className="h-4 w-4 text-primary" />
+                                )}
+                              </div>
                               <h4 className="text-sm font-medium truncate flex-1">
                                 {rule.name}
                               </h4>
@@ -2469,7 +1214,7 @@ export default function Automations() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-6 w-6 text-muted-foreground hover:text-primary"
+                                  className="h-6 w-6 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-all"
                                   onClick={() => {
                                     setEditingRule(rule);
                                     setEditedRule({
@@ -2489,14 +1234,11 @@ export default function Automations() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                  className="h-6 w-6 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
                                   onClick={() => setRuleToDelete(rule)}
                                 >
                                   <CircleX className="h-3 w-3" />
                                 </Button>
-                                <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] whitespace-nowrap">
-                                  {rule.type}
-                                </span>
                               </div>
                             </div>
                             <div>
@@ -2504,37 +1246,58 @@ export default function Automations() {
                                 {rule.description}
                               </p>
                             </div>
-                            <div>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="px-1.5 py-0.5 rounded-sm bg-primary/10 text-primary text-[10px] whitespace-nowrap">
+                                  {rule.type}
+                                </span>
+                                <motion.div
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  transition={{ delay: 0.2 }}
+                                  className="h-1.5 w-1.5 rounded-full bg-green-500"
+                                />
+                              </div>
+                            </div>
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              transition={{ duration: 0.2 }}
+                              className="space-y-2"
+                            >
                               <span className="text-[10px] font-medium text-muted-foreground">
                                 Value
                               </span>
                               {Array.isArray(rule.value) ? (
-                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                <div className="flex flex-wrap gap-1">
                                   {rule.value.map((item, i) => (
-                                    <span
+                                    <motion.span
                                       key={i}
-                                      className="px-1.5 py-0.5 rounded-full bg-muted text-[10px]"
+                                      initial={{ opacity: 0, x: -10 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      transition={{ delay: i * 0.1 }}
+                                      className="px-1.5 py-0.5 rounded-sm bg-muted text-[10px] hover:bg-muted/80 transition-colors cursor-default"
                                     >
                                       {item}
-                                    </span>
+                                    </motion.span>
                                   ))}
                                 </div>
                               ) : (
-                                <div className="mt-0.5">
+                                <div>
                                   {typeof rule.value === "object" ? (
-                                    <pre className="p-1.5 rounded-lg bg-muted font-mono text-[10px] overflow-x-auto max-h-[60px]">
+                                    <pre className="p-1.5 rounded-sm bg-muted font-mono text-[10px] overflow-x-auto max-h-[60px] hover:bg-muted/80 transition-colors">
                                       {JSON.stringify(rule.value, null, 2)}
                                     </pre>
                                   ) : (
-                                    <span className="px-1.5 py-0.5 rounded-md bg-muted text-[10px] inline-block">
+                                    <span className="px-1.5 py-0.5 rounded-sm bg-muted text-[10px] inline-block hover:bg-muted/80 transition-colors cursor-default">
                                       {String(rule.value)}
                                     </span>
                                   )}
                                 </div>
                               )}
-                            </div>
+                            </motion.div>
                           </div>
-                        </Card>
+                        </motion.div>
                       ))}
                     </div>
                   )}
@@ -2543,25 +1306,60 @@ export default function Automations() {
                 {/* Brand Material Rules Section */}
                 <div className="space-y-4">
                   <div>
-                    <h2 className="text-lg font-semibold">
-                      Brand Material Rules
-                    </h2>
+                    <h2 className="text-lg font-medium tracking-tight">Brand Material Rules</h2>
                     <p className="text-sm text-muted-foreground">
                       Rules extracted from your brand materials and guidelines
                     </p>
                   </div>
 
                   {isLoadingRules ? (
-                    <div className="flex justify-center items-center py-8">
-                      <div className="flex flex-col items-center gap-2">
-                        <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
-                        <span className="text-sm text-muted-foreground">
-                          Loading brand rules...
-                        </span>
-                      </div>
+                    <div className="space-y-6">
+                      {[...Array(2)].map((_, i) => (
+                        <div key={i} className="border bg-muted/50">
+                          <div className="bg-muted/50 px-4 py-3 border-b">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="h-8 w-8 bg-muted/50 rounded-sm animate-pulse" />
+                                <div className="space-y-2">
+                                  <div className="h-4 w-48 bg-muted/50 rounded-sm animate-pulse" />
+                                  <div className="h-3 w-32 bg-muted/50 rounded-sm animate-pulse" />
+                                </div>
+                              </div>
+                              <div className="h-8 w-8 bg-muted/50 rounded-sm animate-pulse" />
+                            </div>
+                          </div>
+                          <div className="p-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                              {[...Array(4)].map((_, j) => (
+                                <div key={j} className="border bg-muted/50 p-3">
+                                  <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="h-8 w-8 bg-muted/50 rounded-sm animate-pulse" />
+                                      <div className="h-4 flex-1 bg-muted/50 rounded-sm animate-pulse" />
+                                      <div className="h-4 w-16 bg-muted/50 rounded-sm animate-pulse" />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <div className="h-3 w-full bg-muted/50 rounded-sm animate-pulse" />
+                                      <div className="h-3 w-2/3 bg-muted/50 rounded-sm animate-pulse" />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <div className="h-4 w-16 bg-muted/50 rounded-sm animate-pulse" />
+                                      <div className="flex flex-wrap gap-1">
+                                        <div className="h-4 w-16 bg-muted/50 rounded-sm animate-pulse" />
+                                        <div className="h-4 w-20 bg-muted/50 rounded-sm animate-pulse" />
+                                        <div className="h-4 w-12 bg-muted/50 rounded-sm animate-pulse" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : rulesError ? (
-                    <div className="bg-destructive/10 p-4 rounded-lg text-destructive text-sm">
+                    <div className="bg-destructive/10 p-4 rounded-sm text-destructive text-sm">
                       <div className="font-medium mb-1">
                         Error loading brand rules
                       </div>
@@ -2572,13 +1370,13 @@ export default function Automations() {
                         variant="outline"
                         size="sm"
                         onClick={fetchRules}
-                        className="w-full"
+                        className="w-full rounded-sm"
                       >
                         Retry
                       </Button>
                     </div>
                   ) : brandMaterials.length === 0 ? (
-                    <Card className="p-6">
+                    <div className="border bg-muted/50 p-6">
                       <div className="flex flex-col items-center justify-center text-center">
                         <Scroll className="h-12 w-12 text-muted-foreground/60 mb-4" />
                         <h3 className="text-lg font-medium mb-2">
@@ -2589,42 +1387,76 @@ export default function Automations() {
                           rules and guidelines.
                         </p>
                       </div>
-                    </Card>
+                    </div>
                   ) : (
                     <div className="space-y-6">
                       {brandMaterials.map((material) => (
-                        <Card key={material.id} className="overflow-hidden">
+                        <motion.div
+                          key={material.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="border bg-muted/50 group hover:bg-muted/60 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/5"
+                        >
                           <div className="bg-muted/50 px-4 py-3 border-b">
                             <div className="flex items-center justify-between">
-                              <div>
-                                <h3 className="text-sm font-medium truncate">
-                                  {material.material_url}
-                                </h3>
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                  {material.content_rules.length} rules from{" "}
-                                  {material.material_type} material
-                                </p>
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-primary/10 rounded-sm">
+                                  <FileText className="h-4 w-4 text-primary" />
+                                </div>
+                                <div className="space-y-2">
+                                  <h3 className="text-sm font-medium truncate">
+                                    {material.material_url}
+                                  </h3>
+                                  <p className="text-xs text-muted-foreground">
+                                    {material.content_rules.length} rules from{" "}
+                                    {material.material_type} material
+                                  </p>
+                                </div>
                               </div>
-                              <a
+                              <motion.a
                                 href={material.material_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-muted-foreground hover:text-primary"
+                                className="text-muted-foreground hover:text-primary transition-colors p-2 hover:bg-primary/10 rounded-sm"
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.95 }}
                               >
                                 <ExternalLink className="h-4 w-4" />
-                              </a>
+                              </motion.a>
                             </div>
                           </div>
                           <div className="p-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                               {material.content_rules.map((rule, index) => (
-                                <Card key={index} className="p-3">
-                                  <div className="space-y-2">
+                                <motion.div
+                                  key={index}
+                                  initial={{ opacity: 0, y: 20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ duration: 0.3, delay: index * 0.05 }}
+                                  className="border bg-muted/50 p-3 hover:bg-muted/60 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/5"
+                                >
+                                  <div className="space-y-3">
                                     <div className="flex items-center justify-between gap-2">
+                                      <div className="p-2 bg-primary/10 rounded-sm">
+                                        {rule.type === "tone" ? (
+                                          <Settings className="h-4 w-4 text-primary" />
+                                        ) : rule.type === "formatting" ? (
+                                          <LayoutGrid className="h-4 w-4 text-primary" />
+                                        ) : rule.type === "keyword" ? (
+                                          <Tag className="h-4 w-4 text-primary" />
+                                        ) : rule.type === "compliance" ? (
+                                          <Shield className="h-4 w-4 text-primary" />
+                                        ) : rule.type === "style" ? (
+                                          <Paintbrush className="h-4 w-4 text-primary" />
+                                        ) : (
+                                          <MessageSquare className="h-4 w-4 text-primary" />
+                                        )}
+                                      </div>
                                       <h4 className="text-sm font-medium truncate flex-1">
                                         {rule.name}
                                       </h4>
-                                      <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] whitespace-nowrap">
+                                      <span className="px-1.5 py-0.5 rounded-sm bg-primary/10 text-primary text-[10px] whitespace-nowrap">
                                         {rule.type}
                                       </span>
                                     </div>
@@ -2633,45 +1465,49 @@ export default function Automations() {
                                         {rule.description}
                                       </p>
                                     </div>
-                                    <div>
+                                    <motion.div
+                                      initial={{ opacity: 0, height: 0 }}
+                                      animate={{ opacity: 1, height: "auto" }}
+                                      transition={{ duration: 0.2 }}
+                                      className="space-y-2"
+                                    >
                                       <span className="text-[10px] font-medium text-muted-foreground">
                                         Value
                                       </span>
                                       {Array.isArray(rule.value) ? (
-                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                        <div className="flex flex-wrap gap-1">
                                           {rule.value.map((item, i) => (
-                                            <span
+                                            <motion.span
                                               key={i}
-                                              className="px-1.5 py-0.5 rounded-full bg-muted text-[10px]"
+                                              initial={{ opacity: 0, x: -10 }}
+                                              animate={{ opacity: 1, x: 0 }}
+                                              transition={{ delay: i * 0.1 }}
+                                              className="px-1.5 py-0.5 rounded-sm bg-muted text-[10px] hover:bg-muted/80 transition-colors cursor-default"
                                             >
                                               {item}
-                                            </span>
+                                            </motion.span>
                                           ))}
                                         </div>
                                       ) : (
-                                        <div className="mt-0.5">
+                                        <div>
                                           {typeof rule.value === "object" ? (
-                                            <pre className="p-1.5 rounded-lg bg-muted font-mono text-[10px] overflow-x-auto max-h-[60px]">
-                                              {JSON.stringify(
-                                                rule.value,
-                                                null,
-                                                2
-                                              )}
+                                            <pre className="p-1.5 rounded-sm bg-muted font-mono text-[10px] overflow-x-auto max-h-[60px] hover:bg-muted/80 transition-colors">
+                                              {JSON.stringify(rule.value, null, 2)}
                                             </pre>
                                           ) : (
-                                            <span className="px-1.5 py-0.5 rounded-md bg-muted text-[10px] inline-block">
+                                            <span className="px-1.5 py-0.5 rounded-sm bg-muted text-[10px] inline-block hover:bg-muted/80 transition-colors cursor-default">
                                               {String(rule.value)}
                                             </span>
                                           )}
                                         </div>
                                       )}
-                                    </div>
+                                    </motion.div>
                                   </div>
-                                </Card>
+                                </motion.div>
                               ))}
                             </div>
                           </div>
-                        </Card>
+                        </motion.div>
                       ))}
                     </div>
                   )}
@@ -3097,7 +1933,7 @@ export default function Automations() {
                             const areAllSelected = material.content_rules.every(
                               (_, index) =>
                                 selectedRules[
-                                  `material-${material.id}-${index}`
+                                `material-${material.id}-${index}`
                                 ]
                             );
                             material.content_rules.forEach((_, index) => {
@@ -3109,7 +1945,9 @@ export default function Automations() {
                         >
                           {material.content_rules.every(
                             (_, index) =>
-                              selectedRules[`material-${material.id}-${index}`]
+                              selectedRules[
+                              `material-${material.id}-${index}`
+                              ]
                           )
                             ? "Deselect All"
                             : "Select All"}
@@ -3124,7 +1962,7 @@ export default function Automations() {
                                 id={`material-${material.id}-${index}`}
                                 checked={
                                   selectedRules[
-                                    `material-${material.id}-${index}`
+                                  `material-${material.id}-${index}`
                                   ] ?? true
                                 }
                                 onChange={(e) =>
@@ -3177,7 +2015,9 @@ export default function Automations() {
                   ...brandMaterials.flatMap((material) =>
                     material.content_rules.filter(
                       (_, index) =>
-                        selectedRules[`material-${material.id}-${index}`]
+                        selectedRules[
+                        `material-${material.id}-${index}`
+                        ]
                     )
                   ),
                 ];
@@ -3246,9 +2086,8 @@ export default function Automations() {
                           <div
                             className="bg-primary h-1.5 rounded-full transition-all duration-300"
                             style={{
-                              width: `${
-                                (generatedCount / variantCount) * 100
-                              }%`,
+                              width: `${(generatedCount / variantCount) * 100
+                                }%`,
                             }}
                           />
                         </div>
@@ -3288,7 +2127,7 @@ export default function Automations() {
                     toast.error(errorMessage, {
                       description:
                         err instanceof Error &&
-                        err.message ===
+                          err.message ===
                           "No headlines could be detected in this ad image"
                           ? "Try selecting a different ad or ensure the image contains visible text."
                           : undefined,

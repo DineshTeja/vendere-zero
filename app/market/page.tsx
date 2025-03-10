@@ -5,7 +5,7 @@ import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BarChart3, Globe, MaximizeIcon, Medal, TrendingUp, Users } from "lucide-react";
+import { BarChart3, MaximizeIcon, Medal, TrendingUp, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
