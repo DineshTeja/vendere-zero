@@ -31,7 +31,7 @@ declare module 'ai' {
       task_type: string;
       title: string;
       description: string;
-      input_data: any;
+      input_data: Record<string, unknown>;
       relevance_score: number;
     }>;
   }
@@ -43,6 +43,8 @@ const PurePreviewMessage = ({
   setMessages,
   reload,
   isReadonly,
+  onFeaturedImagesChange,
+  featuredImages = [],
 }: {
   message: Message;
   isLoading: boolean;
@@ -53,6 +55,8 @@ const PurePreviewMessage = ({
     chatRequestOptions?: ChatRequestOptions,
   ) => Promise<string | null | undefined>;
   isReadonly: boolean;
+  onFeaturedImagesChange?: (imageUrls: string[]) => void;
+  featuredImages?: string[];
 }) => {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
 
@@ -126,6 +130,8 @@ const PurePreviewMessage = ({
                       <MessageSources
                         sources={message.sources || []}
                         citations={message.citations || []}
+                        onFeaturedImagesChange={onFeaturedImagesChange}
+                        featuredImages={featuredImages}
                       />
                     ) : null}
 
@@ -154,7 +160,7 @@ const PurePreviewMessage = ({
                         message.role === 'user',
                     })}
                   >
-                    <Markdown>{message.content as string}</Markdown>
+                    <Markdown className={message.role === 'user' ? 'text-[#B1E116]/70' : 'text-white/90'}>{message.content as string}</Markdown>
                   </div>
                 )}
               </div>

@@ -9,7 +9,6 @@ import {
   GlobeIcon,
   LibraryBigIcon,
   BarChart3Icon,
-  KeyboardIcon,
   Settings,
   ImageIcon,
 } from "lucide-react";

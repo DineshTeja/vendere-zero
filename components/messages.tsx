@@ -114,14 +114,13 @@ export function ThinkingMessage({ thinking, query }: { thinking?: string, query?
       collapsedContentRef.current.scrollTop = collapsedContentRef.current.scrollHeight;
     }
 
-    // If we have thinking content, expand the final step only on initial load
-    if (hasThinkingContent && !expandedSteps[finalStepIndex] && Object.keys(expandedSteps).length === 0) {
-      setExpandedSteps(prev => ({
-        ...prev,
-        [finalStepIndex]: true
-      }));
-      return;
-    }
+    // if (hasThinkingContent && !expandedSteps[finalStepIndex] && Object.keys(expandedSteps).length === 0) {
+    //   setExpandedSteps(prev => ({
+    //     ...prev,
+    //     [finalStepIndex]: true
+    //   }));
+    //   return;
+    // }
 
     // Auto-advance steps for animation when in loading state
     if (!hasThinkingContent) {
@@ -490,9 +489,15 @@ function SuggestedTasks({ tasks }: { tasks: Message['suggestedTasks'] }) {
     console.log('Task clicked:', task);
 
     if (task.task_type === 'suggested_query') {
-      alert(`Would execute query: ${task.input_data.query}`);
+      // Safely access query property with type checking
+      const query = task.input_data.query as string | undefined;
+      alert(`Would execute query: ${query || 'No query specified'}`);
     } else if (task.task_type === 'variant_generation') {
-      alert(`Would generate variants with ${task.input_data.keywords.length} keywords for ${task.input_data.target_markets.length} markets`);
+      // Safely access keywords and target_markets with type checking
+      const keywords = task.input_data.keywords as unknown[] | undefined;
+      const targetMarkets = task.input_data.target_markets as unknown[] | undefined;
+
+      alert(`Would generate variants with ${keywords?.length || 0} keywords for ${targetMarkets?.length || 0} markets`);
     }
   };
 
@@ -553,9 +558,9 @@ function SuggestedTasks({ tasks }: { tasks: Message['suggestedTasks'] }) {
                   <div className="mt-2.5 flex items-center justify-between">
                     <div className="text-[11px] text-white/40">
                       {task.task_type === 'variant_generation'
-                        ? `${task.input_data.keywords.length} keywords`
+                        ? `${(task.input_data.keywords as unknown[] || []).length} keywords`
                         : task.task_type === 'suggested_query'
-                          ? (task.input_data.deep_research ? 'Deep research' : 'Quick answer')
+                          ? ((task.input_data.deep_research as boolean) ? 'Deep research' : 'Quick answer')
                           : ''}
                     </div>
                     <div className="h-1 w-12 bg-white/[0.05] rounded-full overflow-hidden">
@@ -575,11 +580,13 @@ function SuggestedTasks({ tasks }: { tasks: Message['suggestedTasks'] }) {
   );
 }
 
-function ImageGrid({ sources }: { sources: Source[], citations?: string[] }) {
+function ImageGrid({ sources, featuredImages }: { sources: Source[], citations?: string[], featuredImages?: string[] }) {
   // Extract image URLs from sources
-  const imageUrls = sources
-    .map(source => source.extra_info?.image_url)
-    .filter((url): url is string => !!url);
+  const imageUrls = featuredImages && featuredImages.length > 0
+    ? featuredImages
+    : sources
+      .map(source => source.extra_info?.image_url)
+      .filter((url): url is string => !!url);
 
   // We don't include citation images here since they don't have preview images
   // This could be expanded in the future if needed
@@ -620,6 +627,8 @@ function MessageWithImages({ message, isLoading, setMessages, reload, isReadonly
   reload: MessagesProps['reload'];
   isReadonly: boolean;
 }) {
+  const [featuredImages, setFeaturedImages] = useState<string[]>([]);
+
   const hasVisualContent =
     message.role === 'assistant' &&
     ((message.sources && message.sources.length > 0) ||
@@ -654,6 +663,11 @@ function MessageWithImages({ message, isLoading, setMessages, reload, isReadonly
   const hasThinking = message.role === 'assistant' &&
     (isLoading || (message as { thinking?: string }).thinking !== undefined);
 
+  // Handler for featured images updates - will be passed to PreviewMessage
+  const handleFeaturedImagesChange = (imageUrls: string[]) => {
+    setFeaturedImages(imageUrls);
+  };
+
   return (
     <div className="flex items-start justify-center w-full">
       <div className="w-full max-w-[1200px] relative">
@@ -679,7 +693,11 @@ function MessageWithImages({ message, isLoading, setMessages, reload, isReadonly
               setMessages={setMessages}
               reload={reload}
               isReadonly={isReadonly}
+              onFeaturedImagesChange={handleFeaturedImagesChange}
+              featuredImages={featuredImages}
             />
+
+            {/* Removed duplicate MessageSources component */}
           </div>
 
           {/* Right column - Image Grid - hidden on mobile */}
@@ -688,6 +706,7 @@ function MessageWithImages({ message, isLoading, setMessages, reload, isReadonly
               <ImageGrid
                 sources={message.sources || []}
                 citations={message.citations}
+                featuredImages={featuredImages}
               />
             )}
           </div>
@@ -710,6 +729,7 @@ function MessageWithImages({ message, isLoading, setMessages, reload, isReadonly
               <ImageGrid
                 sources={message.sources || []}
                 citations={message.citations}
+                featuredImages={featuredImages}
               />
             </div>
           )}

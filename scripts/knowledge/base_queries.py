@@ -140,7 +140,7 @@ Even when specific market data isn't provided, you should leverage your extensiv
                 },
                 {"role": "user", "content": prompt},
             ],
-            "max_tokens": self.num_output,
+            # "max_tokens": self.num_output,
             "temperature": self.temperature,
         }
 
@@ -2006,6 +2006,34 @@ Provide tactical recommendations based on both campaign/channel performance and 
         """
         print(f"Starting stream_query for: {query[:50]}...")
 
+        # Check if query contains attribution-related terms
+        attribution_keywords = [
+            "attribution",
+            "campaign performance",
+            "channel performance",
+            "roas",
+            "roi",
+            "conversion rate",
+            "ctr",
+            "cpc",
+            "cpm",
+            "which campaigns",
+            "which channels",
+            "best performing",
+            "campaign metrics",
+            "marketing performance",
+            "ad spend",
+            "visual features",  # Added visual feature related keywords
+            "feature performance",
+            "visual elements",
+            "best categories",
+            "top locations",
+        ]
+
+        has_attribution_terms = any(
+            keyword in query.lower() for keyword in attribution_keywords
+        )
+
         # Initialize response data structure
         response_data = {"response": "", "citations": [], "sources": []}
 
@@ -2025,6 +2053,9 @@ Provide tactical recommendations based on both campaign/channel performance and 
             template = self.qa_templates["comprehensive"]
         else:
             template = self.qa_templates["comprehensive"]
+
+        if has_attribution_terms:
+            template = self.qa_templates["attribution"]
 
         # Step 1: Retrieve relevant chunks using the SAME logic as _fast_query_engine
         max_chunks = 1  # Start with 1 chunk for lower detail levels
