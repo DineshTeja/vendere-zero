@@ -68,11 +68,6 @@ const getNavData = () => ({
       url: "/query",
       icon: GlobeIcon,
     },
-    {
-      title: "Keywords",
-      url: "/keywords/list",
-      icon: KeyboardIcon,
-    },
     // {
     //   title: "Ad variants",
     //   url: "/ad-variants",

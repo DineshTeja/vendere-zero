@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import Image from "next/image";
+import React, { useState, useEffect, useRef } from "react";
 import { CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -14,6 +13,10 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  Trash2,
+  Eye,
+  MousePointerClick,
+  Target,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -53,6 +56,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import { Progress } from "@/components/ui/progress";
+import ReactMarkdown from "react-markdown";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import remarkGfm from "remark-gfm";
 
 // Update the type for original headlines
 type OriginalHeadline = {
@@ -154,6 +177,34 @@ const formatUrl = (url: string): string => {
   }
 };
 
+type Headline = {
+  area?: number;
+  text: string;
+  type: string;
+  original: string;
+  aspect_ratio?: number;
+  bounding_box?: {
+    width: number;
+    center: [number, number];
+    height: number;
+    top_left: [number, number];
+    top_right: [number, number];
+    bottom_left: [number, number];
+    bottom_right: [number, number];
+  };
+};
+
+// Utility function to format large numbers
+const formatCompactNumber = (num: number): string => {
+  if (num >= 1000000) {
+    return `${(num / 1000000).toFixed(1)}M`;
+  }
+  if (num >= 1000) {
+    return `${(num / 1000).toFixed(1)}k`;
+  }
+  return num.toString();
+};
+
 // Component to handle ad image display with ad blocker consideration
 const AdImage = ({
   src,
@@ -163,6 +214,8 @@ const AdImage = ({
   isSelected = false,
   onClick,
   preserveAspectRatio = false,
+  new_headlines = [],
+  handleBoundingBoxClick = () => {},
 }: {
   src?: string;
   className?: string;
@@ -171,10 +224,22 @@ const AdImage = ({
   isSelected?: boolean;
   onClick?: () => void;
   preserveAspectRatio?: boolean;
+  new_headlines?: Array<Headline>;
+  handleBoundingBoxClick?: (headline: Headline) => void;
 }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [wasBlocked, setWasBlocked] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const [originalDimensions, setOriginalDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   // Check if a URL is likely to be blocked by ad blockers
   const isLikelyToBeBlocked = (url: string): boolean => {
@@ -208,12 +273,94 @@ const AdImage = ({
   // Computed image URL with proxy if needed
   const imageUrl = React.useMemo(() => getImageUrl(src), [src]);
 
-  // Reset error state if src changes
+  // Reset dimensions when src changes or when component remounts
   useEffect(() => {
     setHasError(false);
     setIsLoading(true);
     setWasBlocked(false);
-  }, [src]);
+    setOriginalDimensions(null);
+    setImageDimensions(null);
+
+    // Get original image dimensions
+    if (imageUrl) {
+      const img = new window.Image();
+      img.onload = () => {
+        setOriginalDimensions({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      };
+      img.src = imageUrl;
+    }
+
+    // Cleanup function
+    return () => {
+      setImageDimensions(null);
+      setOriginalDimensions(null);
+    };
+  }, [imageUrl]);
+
+  // Update container and rendered image dimensions when image loads or container resizes
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (!containerRef.current || !imageRef.current) return;
+
+      const imageRect = imageRef.current.getBoundingClientRect();
+
+      // Only update if dimensions have actually changed
+      if (
+        !imageDimensions ||
+        imageDimensions.width !== imageRect.width ||
+        imageDimensions.height !== imageRect.height
+      ) {
+        setImageDimensions({
+          width: imageRect.width,
+          height: imageRect.height,
+        });
+      }
+    };
+
+    const observer = new ResizeObserver(updateDimensions);
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    // Initial update
+    updateDimensions();
+
+    return () => {
+      if (containerRef.current) {
+        observer.unobserve(containerRef.current);
+      }
+    };
+  }, [imageDimensions]);
+
+  // Add mutation observer to detect DOM changes that might affect layout
+  useEffect(() => {
+    const mutationObserver = new MutationObserver(() => {
+      if (containerRef.current && imageRef.current) {
+        const imageRect = imageRef.current.getBoundingClientRect();
+
+        setImageDimensions({
+          width: imageRect.width,
+          height: imageRect.height,
+        });
+      }
+    });
+
+    if (containerRef.current) {
+      mutationObserver.observe(containerRef.current, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    return () => {
+      mutationObserver.disconnect();
+    };
+  }, []);
 
   // Function to detect errors
   const handleImageError = () => {
@@ -256,6 +403,7 @@ const AdImage = ({
 
   return (
     <div
+      ref={containerRef}
       className={`relative border rounded-md overflow-hidden bg-background cursor-pointer transition-all hover:opacity-90 ${
         isSelected ? "ring-2 ring-primary" : ""
       } ${className}`}
@@ -264,7 +412,7 @@ const AdImage = ({
           ? { width: size, height: size }
           : preserveAspectRatio
           ? { aspectRatio: "1/1", width: "100%" }
-          : { width: "100%", minHeight: "400px" }
+          : { width: "100%", height: "100%" }
       }
       onClick={onClick}
     >
@@ -273,15 +421,136 @@ const AdImage = ({
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       )}
-      <Image
-        src={imageUrl}
-        alt={alt}
-        fill
-        className={preserveAspectRatio ? "object-cover" : "object-contain"}
-        onError={handleImageError}
-        onLoadingComplete={() => setIsLoading(false)}
-        unoptimized
-      />
+      <div className="flex items-center justify-center h-full w-full relative">
+        <img
+          ref={imageRef}
+          src={imageUrl}
+          alt={alt}
+          className={cn(
+            "w-full h-full",
+            isSelected ? "ring-2 ring-primary" : "",
+            preserveAspectRatio ? "object-cover" : "object-contain"
+          )}
+          style={{
+            maxWidth: "100%",
+            maxHeight: "100%",
+          }}
+          onError={handleImageError}
+          onLoad={(e) => {
+            setIsLoading(false);
+            // Update original dimensions when image loads
+            const img = e.target as HTMLImageElement;
+            setOriginalDimensions({
+              width: img.naturalWidth,
+              height: img.naturalHeight,
+            });
+          }}
+        />
+      </div>
+
+      {/* Bounding Box Overlays */}
+      {!isLoading &&
+        imageDimensions &&
+        originalDimensions &&
+        new_headlines.map((headline, index) => {
+          if (!headline.bounding_box) return null;
+
+          const box = headline.bounding_box;
+          const containerRect = containerRef.current?.getBoundingClientRect();
+          const imageRect = imageRef.current?.getBoundingClientRect();
+
+          if (!containerRect || !imageRect) return null;
+
+          // Calculate the actual rendered image dimensions
+          const renderedWidth = imageRect.width;
+          const renderedHeight = imageRect.height;
+
+          // Calculate scale factors based on the actual rendered image size
+          const scaleX = renderedWidth / originalDimensions.width;
+          const scaleY = renderedHeight / originalDimensions.height;
+
+          // Calculate padding due to object-contain
+          const horizontalPadding = (containerRect.width - renderedWidth) / 2;
+          const verticalPadding = (containerRect.height - renderedHeight) / 2;
+
+          // Scale and position the bounding box
+          const scaledBox = {
+            width: box.width * scaleX,
+            height: box.height * scaleY,
+            top: box.top_left[1] * scaleY + verticalPadding,
+            left: box.top_left[0] * scaleX + horizontalPadding,
+          };
+
+          // Calculate available space on each side
+          const spaceLeft = scaledBox.left;
+          const spaceRight =
+            containerRect.width - (scaledBox.left + scaledBox.width);
+          const spaceTop = scaledBox.top;
+
+          // Determine label position based on available space
+          // Try left/right first, then fallback to top/bottom if necessary
+          const labelWidth = 200; // max-w-[200px] from the className
+          const labelHeight = 32; // Approximate height of the label
+          const padding = 8; // Padding between box and label
+
+          let labelPosition: "left" | "right" | "top" | "bottom";
+
+          if (spaceLeft >= labelWidth + padding) {
+            labelPosition = "left";
+          } else if (spaceRight >= labelWidth + padding) {
+            labelPosition = "right";
+          } else if (spaceTop >= labelHeight + padding) {
+            labelPosition = "top";
+          } else {
+            labelPosition = "bottom";
+          }
+
+          return (
+            <div key={index} onClick={() => handleBoundingBoxClick(headline)}>
+              {/* Bounding box */}
+              <div
+                className="absolute border-2 border-primary/50 bg-primary/10 hover:bg-green-500/20 hover:border-green-500/50 transition-all"
+                style={{
+                  width: scaledBox.width,
+                  height: scaledBox.height,
+                  top: scaledBox.top,
+                  left: scaledBox.left,
+                }}
+              />
+
+              {/* Variant text */}
+              <div
+                className={`absolute px-2 py-1 bg-background/90 text-xs border rounded shadow-sm max-w-[200px] whitespace-normal`}
+                style={{
+                  ...{
+                    left:
+                      labelPosition === "left"
+                        ? scaledBox.left - labelWidth - padding
+                        : labelPosition === "right"
+                        ? scaledBox.left + scaledBox.width + padding
+                        : scaledBox.left,
+                    top:
+                      labelPosition === "top"
+                        ? scaledBox.top - labelHeight - padding
+                        : labelPosition === "bottom"
+                        ? scaledBox.top + scaledBox.height + padding
+                        : scaledBox.top +
+                          scaledBox.height / 2 -
+                          labelHeight / 2,
+                    width:
+                      labelPosition === "left" || labelPosition === "right"
+                        ? labelWidth
+                        : undefined,
+                    minHeight: labelHeight,
+                    height: "auto",
+                  },
+                }}
+              >
+                {headline.text}
+              </div>
+            </div>
+          );
+        })}
     </div>
   );
 };
@@ -313,6 +582,18 @@ type HeadlineVariant = {
   }>;
   created_at: string;
   updated_at: string;
+  overall_success_likelihood: { metric: number; reason: string };
+  predicted_impressions: { metric: number; reason: string };
+  predicted_clicks: { metric: number; reason: string };
+  predicted_ctr: { metric: number; reason: string };
+  predicted_conversions: { metric: number; reason: string };
+};
+
+type OriginalAdMetrics = {
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  conversions: number;
 };
 
 export default function Automations() {
@@ -384,6 +665,10 @@ export default function Automations() {
   // Add state for current headline index
   const [currentHeadlineIndex, setCurrentHeadlineIndex] = useState(0);
 
+  // Add state for variant to delete
+  const [variantToDelete, setVariantToDelete] =
+    useState<HeadlineVariant | null>(null);
+
   // Reset current headline index when selected variant changes
   useEffect(() => {
     setCurrentHeadlineIndex(0);
@@ -413,6 +698,64 @@ export default function Automations() {
   // Get the selected ad
   const selectedAd =
     selectedAdIndex !== null ? adVariants[selectedAdIndex] : null;
+
+  // Get the original metrics for the selected ad
+  const [originalMetrics, setOriginalMetrics] =
+    useState<OriginalAdMetrics | null>(null);
+
+  useEffect(() => {
+    const fetchOriginalMetrics = async () => {
+      if (!selectedAd) {
+        setOriginalMetrics(null);
+        return;
+      }
+
+      try {
+        const { data: libraryData, error: libraryError } = await supabase
+          .from("library_items")
+          .select("*")
+          .eq("preview_url", selectedAd.li_preview_url)
+          .single();
+
+        if (libraryError) {
+          console.error("Error fetching library item:", libraryError);
+          setOriginalMetrics(null);
+          return;
+        }
+
+        if (!libraryData) {
+          console.error("No library item found for the selected ad");
+          setOriginalMetrics(null);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("enhanced_ad_metrics")
+          .select("impressions, clicks, ctr, conversions")
+          .eq("ad_id", libraryData.id)
+          .single();
+
+        if (error) {
+          console.error("Error fetching original metrics:", error);
+          setOriginalMetrics(null);
+          return;
+        }
+
+        if (!data) {
+          console.error("No original metrics found for the selected ad");
+          setOriginalMetrics(null);
+          return;
+        }
+
+        setOriginalMetrics(data);
+      } catch (err) {
+        console.error("Error fetching original metrics:", err);
+        setOriginalMetrics(null);
+      }
+    };
+
+    fetchOriginalMetrics();
+  }, [selectedAd]);
 
   // Fetch ad variants from Supabase
   const fetchAdVariants = async () => {
@@ -695,6 +1038,26 @@ export default function Automations() {
     }
   };
 
+  // Add delete variant function
+  const handleDeleteVariant = async (variant: HeadlineVariant) => {
+    try {
+      const { error } = await supabase
+        .from("headline_variants")
+        .delete()
+        .eq("id", variant.id);
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success("Variant deleted successfully");
+      setVariantToDelete(null);
+    } catch (error) {
+      console.error("Error deleting variant:", error);
+      toast.error("Failed to delete variant");
+    }
+  };
+
   return (
     <div className="bg-background overflow-hidden overflow-y-clip overscroll-y-none">
       <div className="max-w-[1600px] mx-auto p-4">
@@ -954,12 +1317,14 @@ export default function Automations() {
                           {/* Ad Preview */}
                           <div className="space-y-4">
                             <h3 className="text-sm font-medium">Ad Preview</h3>
-                            <AdImage
-                              src={selectedAd.mr_image_url}
-                              alt="Ad preview"
-                              className="w-full max-h-[400px]"
-                              preserveAspectRatio={false}
-                            />
+                            <div className="w-full flex items-center justify-center border rounded-lg">
+                              <AdImage
+                                src={selectedAd.mr_image_url}
+                                alt="Ad preview"
+                                className="w-full max-w-[600px]"
+                                preserveAspectRatio={false}
+                              />
+                            </div>
                           </div>
 
                           {/* Generated Variants Section */}
@@ -996,6 +1361,16 @@ export default function Automations() {
                                             )
                                           )
                                         )}
+                                      <TableHead className="text-right">
+                                        Success
+                                      </TableHead>
+                                      <TableHead className="text-right">
+                                        CTR
+                                      </TableHead>
+                                      <TableHead className="text-right">
+                                        Metrics
+                                      </TableHead>
+                                      <TableHead className="w-[50px]"></TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
@@ -1023,6 +1398,82 @@ export default function Automations() {
                                                 </div>
                                               </TableCell>
                                             )
+                                          )}
+                                          {originalMetrics && (
+                                            <>
+                                              <TableCell>
+                                                {/* Skip success likelihood for original metrics */}
+                                              </TableCell>
+                                              <TableCell>
+                                                <div className="flex items-center gap-2">
+                                                  <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
+                                                    <div
+                                                      className={cn(
+                                                        "h-full transition-all",
+                                                        originalMetrics.ctr >=
+                                                          0.05
+                                                          ? "bg-green-500"
+                                                          : originalMetrics.ctr >=
+                                                            0.02
+                                                          ? "bg-yellow-500"
+                                                          : "bg-red-500"
+                                                      )}
+                                                      style={{
+                                                        width: `${
+                                                          originalMetrics.ctr *
+                                                          1000
+                                                        }%`,
+                                                      }}
+                                                    />
+                                                  </div>
+                                                  <span
+                                                    className={cn(
+                                                      "text-xs tabular-nums font-medium",
+                                                      originalMetrics.ctr >=
+                                                        0.05
+                                                        ? "text-green-600"
+                                                        : originalMetrics.ctr >=
+                                                          0.02
+                                                        ? "text-yellow-600"
+                                                        : "text-red-600"
+                                                    )}
+                                                  >
+                                                    {(
+                                                      originalMetrics.ctr * 100
+                                                    ).toFixed(2)}
+                                                    %
+                                                  </span>
+                                                </div>
+                                              </TableCell>
+                                              <TableCell>
+                                                <div className="space-y-1.5">
+                                                  <div className="flex items-center gap-2">
+                                                    <Eye className="h-3 w-3 text-blue-500" />
+                                                    <span className="text-xs tabular-nums font-medium text-blue-600">
+                                                      {formatCompactNumber(
+                                                        originalMetrics.impressions
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <MousePointerClick className="h-3 w-3 text-violet-500" />
+                                                    <span className="text-xs tabular-nums font-medium text-violet-600">
+                                                      {formatCompactNumber(
+                                                        originalMetrics.clicks
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <Target className="h-3 w-3 text-green-500" />
+                                                    <span className="text-xs tabular-nums font-medium text-green-600">
+                                                      {formatCompactNumber(
+                                                        originalMetrics.conversions
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              </TableCell>
+                                            </>
                                           )}
                                         </TableRow>
                                       ))}
@@ -1057,6 +1508,230 @@ export default function Automations() {
                                               </TableCell>
                                             )
                                           )}
+                                          <TableCell>
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
+                                                <div
+                                                  className={cn(
+                                                    "h-full transition-all",
+                                                    variant
+                                                      .overall_success_likelihood
+                                                      .metric >= 75
+                                                      ? "bg-green-500"
+                                                      : variant
+                                                          .overall_success_likelihood
+                                                          .metric >= 50
+                                                      ? "bg-yellow-500"
+                                                      : "bg-red-500"
+                                                  )}
+                                                  style={{
+                                                    width: `${
+                                                      variant
+                                                        .overall_success_likelihood
+                                                        .metric || 0
+                                                    }%`,
+                                                  }}
+                                                />
+                                              </div>
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <span
+                                                      className={cn(
+                                                        "text-xs tabular-nums font-medium cursor-help",
+                                                        variant
+                                                          .overall_success_likelihood
+                                                          .metric >= 75
+                                                          ? "text-green-600"
+                                                          : variant
+                                                              .overall_success_likelihood
+                                                              .metric >= 50
+                                                          ? "text-yellow-600"
+                                                          : "text-red-600"
+                                                      )}
+                                                    >
+                                                      {variant.overall_success_likelihood.metric?.toFixed(
+                                                        1
+                                                      )}
+                                                      %
+                                                    </span>
+                                                  </TooltipTrigger>
+                                                  <TooltipContent
+                                                    side="top"
+                                                    className="max-w-[300px] p-3"
+                                                  >
+                                                    <ReactMarkdown>
+                                                      {
+                                                        variant
+                                                          .overall_success_likelihood
+                                                          .reason
+                                                      }
+                                                    </ReactMarkdown>
+                                                  </TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
+                                                <div
+                                                  className={cn(
+                                                    "h-full transition-all",
+                                                    variant.predicted_ctr
+                                                      .metric >= 5
+                                                      ? "bg-green-500"
+                                                      : variant.predicted_ctr
+                                                          .metric >= 2
+                                                      ? "bg-yellow-500"
+                                                      : "bg-red-500"
+                                                  )}
+                                                  style={{
+                                                    width: `${
+                                                      variant.predicted_ctr
+                                                        .metric * 10 || 0
+                                                    }%`,
+                                                  }}
+                                                />
+                                              </div>
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <span
+                                                      className={cn(
+                                                        "text-xs tabular-nums font-medium cursor-help",
+                                                        variant.predicted_ctr
+                                                          .metric >= 5
+                                                          ? "text-green-600"
+                                                          : variant
+                                                              .predicted_ctr
+                                                              .metric >= 2
+                                                          ? "text-yellow-600"
+                                                          : "text-red-600"
+                                                      )}
+                                                    >
+                                                      {variant.predicted_ctr.metric?.toFixed(
+                                                        2
+                                                      )}
+                                                      %
+                                                    </span>
+                                                  </TooltipTrigger>
+                                                  <TooltipContent
+                                                    side="top"
+                                                    className="max-w-[300px] p-3"
+                                                  >
+                                                    <ReactMarkdown>
+                                                      {
+                                                        variant.predicted_ctr
+                                                          .reason
+                                                      }
+                                                    </ReactMarkdown>
+                                                  </TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <div className="space-y-1.5">
+                                              <div className="flex items-center gap-2">
+                                                <Eye className="h-3 w-3 text-blue-500" />
+                                                <TooltipProvider>
+                                                  <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                      <span className="text-xs tabular-nums font-medium text-blue-600 cursor-help">
+                                                        {formatCompactNumber(
+                                                          variant
+                                                            .predicted_impressions
+                                                            .metric
+                                                        )}
+                                                      </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                      side="top"
+                                                      className="max-w-[300px] p-3"
+                                                    >
+                                                      <ReactMarkdown>
+                                                        {
+                                                          variant
+                                                            .predicted_impressions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </TooltipContent>
+                                                  </Tooltip>
+                                                </TooltipProvider>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <MousePointerClick className="h-3 w-3 text-violet-500" />
+                                                <TooltipProvider>
+                                                  <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                      <span className="text-xs tabular-nums font-medium text-violet-600 cursor-help">
+                                                        {formatCompactNumber(
+                                                          variant
+                                                            .predicted_clicks
+                                                            .metric
+                                                        )}
+                                                      </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                      side="top"
+                                                      className="max-w-[300px] p-3"
+                                                    >
+                                                      <ReactMarkdown>
+                                                        {
+                                                          variant
+                                                            .predicted_clicks
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </TooltipContent>
+                                                  </Tooltip>
+                                                </TooltipProvider>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <Target className="h-3 w-3 text-green-500" />
+                                                <TooltipProvider>
+                                                  <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                      <span className="text-xs tabular-nums font-medium text-green-600 cursor-help">
+                                                        {formatCompactNumber(
+                                                          variant
+                                                            .predicted_conversions
+                                                            .metric
+                                                        )}
+                                                      </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                      side="top"
+                                                      className="max-w-[300px] p-3"
+                                                    >
+                                                      <ReactMarkdown>
+                                                        {
+                                                          variant
+                                                            .predicted_conversions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </TooltipContent>
+                                                  </Tooltip>
+                                                </TooltipProvider>
+                                              </div>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setVariantToDelete(variant);
+                                              }}
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </TableCell>
                                         </TableRow>
                                       ))}
                                   </TableBody>
@@ -1091,8 +1766,26 @@ export default function Automations() {
                                             <AdImage
                                               src={selectedVariant.image_url}
                                               alt="Ad preview"
-                                              className="w-full max-h-[400px]"
+                                              className="w-full"
                                               preserveAspectRatio={false}
+                                              new_headlines={
+                                                selectedVariant.new_headlines
+                                              }
+                                              handleBoundingBoxClick={(
+                                                headline
+                                              ) => {
+                                                // Find the index of the clicked headline
+                                                const index =
+                                                  selectedVariant.new_headlines.findIndex(
+                                                    (h) =>
+                                                      h.text === headline.text
+                                                  );
+                                                if (index !== -1) {
+                                                  setCurrentHeadlineIndex(
+                                                    index
+                                                  );
+                                                }
+                                              }}
                                             />
                                           </div>
 
@@ -1284,6 +1977,286 @@ export default function Automations() {
                                                 </div>
                                               </div>
                                             </Card>
+                                          </div>
+
+                                          {/* Performance Metrics Section */}
+                                          <div className="space-y-6">
+                                            <div>
+                                              <h3 className="text-lg font-medium mb-4">
+                                                Performance Metrics
+                                              </h3>
+                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {/* Success Likelihood */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Success Likelihood
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted success rate
+                                                        </p>
+                                                      </div>
+                                                      <div
+                                                        className={cn(
+                                                          "px-2.5 py-0.5 rounded-full text-xs font-semibold",
+                                                          selectedVariant
+                                                            .overall_success_likelihood
+                                                            .metric >= 75
+                                                            ? "bg-green-500/10 text-green-700"
+                                                            : selectedVariant
+                                                                .overall_success_likelihood
+                                                                .metric >= 50
+                                                            ? "bg-yellow-500/10 text-yellow-700"
+                                                            : "bg-red-500/10 text-red-700"
+                                                        )}
+                                                      >
+                                                        {selectedVariant.overall_success_likelihood.metric.toFixed(
+                                                          1
+                                                        )}
+                                                        %
+                                                      </div>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                                                        <div
+                                                          className={cn(
+                                                            "h-full transition-all",
+                                                            selectedVariant
+                                                              .overall_success_likelihood
+                                                              .metric >= 75
+                                                              ? "bg-green-500"
+                                                              : selectedVariant
+                                                                  .overall_success_likelihood
+                                                                  .metric >= 50
+                                                              ? "bg-yellow-500"
+                                                              : "bg-red-500"
+                                                          )}
+                                                          style={{
+                                                            width: `${selectedVariant.overall_success_likelihood.metric}%`,
+                                                          }}
+                                                        />
+                                                      </div>
+                                                      <div className="text-sm text-muted-foreground">
+                                                        <ReactMarkdown
+                                                          remarkPlugins={[
+                                                            remarkGfm,
+                                                          ]}
+                                                          className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                        >
+                                                          {
+                                                            selectedVariant
+                                                              .overall_success_likelihood
+                                                              .reason
+                                                          }
+                                                        </ReactMarkdown>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-muted/50 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* CTR */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Click-Through Rate
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted engagement
+                                                        </p>
+                                                      </div>
+                                                      <div
+                                                        className={cn(
+                                                          "px-2.5 py-0.5 rounded-full text-xs font-semibold",
+                                                          selectedVariant
+                                                            .predicted_ctr
+                                                            .metric >= 5
+                                                            ? "bg-green-500/10 text-green-700"
+                                                            : selectedVariant
+                                                                .predicted_ctr
+                                                                .metric >= 2
+                                                            ? "bg-yellow-500/10 text-yellow-700"
+                                                            : "bg-red-500/10 text-red-700"
+                                                        )}
+                                                      >
+                                                        {selectedVariant.predicted_ctr.metric.toFixed(
+                                                          2
+                                                        )}
+                                                        %
+                                                      </div>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                                                        <div
+                                                          className={cn(
+                                                            "h-full transition-all",
+                                                            selectedVariant
+                                                              .predicted_ctr
+                                                              .metric >= 5
+                                                              ? "bg-green-500"
+                                                              : selectedVariant
+                                                                  .predicted_ctr
+                                                                  .metric >= 2
+                                                              ? "bg-yellow-500"
+                                                              : "bg-red-500"
+                                                          )}
+                                                          style={{
+                                                            width: `${
+                                                              selectedVariant
+                                                                .predicted_ctr
+                                                                .metric * 10
+                                                            }%`,
+                                                          }}
+                                                        />
+                                                      </div>
+                                                      <div className="text-sm text-muted-foreground">
+                                                        <ReactMarkdown
+                                                          remarkPlugins={[
+                                                            remarkGfm,
+                                                          ]}
+                                                          className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                        >
+                                                          {
+                                                            selectedVariant
+                                                              .predicted_ctr
+                                                              .reason
+                                                          }
+                                                        </ReactMarkdown>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-muted/50 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* Impressions */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Impressions
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted reach
+                                                        </p>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <Eye className="h-4 w-4 text-blue-500" />
+                                                        <span className="text-sm font-semibold text-blue-700">
+                                                          {formatCompactNumber(
+                                                            selectedVariant
+                                                              .predicted_impressions
+                                                              .metric
+                                                          )}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                      <ReactMarkdown
+                                                        remarkPlugins={[
+                                                          remarkGfm,
+                                                        ]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                      >
+                                                        {
+                                                          selectedVariant
+                                                            .predicted_impressions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-blue-500/5 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* Clicks */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Clicks
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted interactions
+                                                        </p>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <MousePointerClick className="h-4 w-4 text-violet-500" />
+                                                        <span className="text-sm font-semibold text-violet-700">
+                                                          {formatCompactNumber(
+                                                            selectedVariant
+                                                              .predicted_clicks
+                                                              .metric
+                                                          )}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                      <ReactMarkdown
+                                                        remarkPlugins={[
+                                                          remarkGfm,
+                                                        ]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                      >
+                                                        {
+                                                          selectedVariant
+                                                            .predicted_clicks
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-violet-500/5 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* Conversions */}
+                                                <Card className="p-6 relative overflow-hidden col-span-2">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Conversions
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted successful
+                                                          outcomes
+                                                        </p>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <Target className="h-4 w-4 text-green-500" />
+                                                        <span className="text-sm font-semibold text-green-700">
+                                                          {formatCompactNumber(
+                                                            selectedVariant
+                                                              .predicted_conversions
+                                                              .metric
+                                                          )}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                      <ReactMarkdown
+                                                        remarkPlugins={[
+                                                          remarkGfm,
+                                                        ]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                      >
+                                                        {
+                                                          selectedVariant
+                                                            .predicted_conversions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-green-500/5 to-transparent opacity-50" />
+                                                </Card>
+                                              </div>
+                                            </div>
                                           </div>
 
                                           {/* Rules Used Section */}
@@ -2340,6 +3313,33 @@ export default function Automations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add Delete Variant Dialog */}
+      <AlertDialog
+        open={!!variantToDelete}
+        onOpenChange={() => setVariantToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this variant and all its associated
+              data. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() =>
+                variantToDelete && handleDeleteVariant(variantToDelete)
+              }
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
