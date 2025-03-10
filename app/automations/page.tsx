@@ -13,6 +13,7 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -53,6 +54,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 // Update the type for original headlines
 type OriginalHeadline = {
@@ -619,6 +630,10 @@ export default function Automations() {
   // Add state for current headline index
   const [currentHeadlineIndex, setCurrentHeadlineIndex] = useState(0);
 
+  // Add state for variant to delete
+  const [variantToDelete, setVariantToDelete] =
+    useState<HeadlineVariant | null>(null);
+
   // Reset current headline index when selected variant changes
   useEffect(() => {
     setCurrentHeadlineIndex(0);
@@ -930,6 +945,26 @@ export default function Automations() {
     }
   };
 
+  // Add delete variant function
+  const handleDeleteVariant = async (variant: HeadlineVariant) => {
+    try {
+      const { error } = await supabase
+        .from("headline_variants")
+        .delete()
+        .eq("id", variant.id);
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success("Variant deleted successfully");
+      setVariantToDelete(null);
+    } catch (error) {
+      console.error("Error deleting variant:", error);
+      toast.error("Failed to delete variant");
+    }
+  };
+
   return (
     <div className="bg-background overflow-hidden overflow-y-clip overscroll-y-none">
       <div className="max-w-[1600px] mx-auto p-4">
@@ -1233,6 +1268,7 @@ export default function Automations() {
                                             )
                                           )
                                         )}
+                                      <TableHead className="w-[50px]"></TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
@@ -1294,6 +1330,19 @@ export default function Automations() {
                                               </TableCell>
                                             )
                                           )}
+                                          <TableCell>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setVariantToDelete(variant);
+                                              }}
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </TableCell>
                                         </TableRow>
                                       ))}
                                   </TableBody>
@@ -2595,6 +2644,33 @@ export default function Automations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add Delete Variant Dialog */}
+      <AlertDialog
+        open={!!variantToDelete}
+        onOpenChange={() => setVariantToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this variant and all its associated
+              data. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() =>
+                variantToDelete && handleDeleteVariant(variantToDelete)
+              }
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
