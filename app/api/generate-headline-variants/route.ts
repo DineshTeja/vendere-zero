@@ -635,7 +635,7 @@ export async function POST(request: Request) {
           reason: [
             acc.predicted_impressions?.reason || "",
             variant.predicted_impressions?.reason || "",
-          ].filter(Boolean).join("\n\n"),
+          ].filter(Boolean)[0],
         },
         predicted_clicks: {
           metric: Math.round(
@@ -645,7 +645,7 @@ export async function POST(request: Request) {
           reason: [
             acc.predicted_clicks?.reason || "",
             variant.predicted_clicks?.reason || "",
-          ].filter(Boolean).join("\n\n"),
+          ].filter(Boolean)[0],
         },
         predicted_ctr: {
           metric: Number(
@@ -658,7 +658,7 @@ export async function POST(request: Request) {
           reason: [
             acc.predicted_ctr?.reason || "",
             variant.predicted_ctr?.reason || "",
-          ].filter(Boolean).join("\n\n"),
+          ].filter(Boolean)[0],
         },
         predicted_conversions: {
           metric: Math.round(
@@ -668,7 +668,7 @@ export async function POST(request: Request) {
           reason: [
             acc.predicted_conversions?.reason || "",
             variant.predicted_conversions?.reason || "",
-          ].filter(Boolean).join("\n\n"),
+          ].filter(Boolean)[0],
         },
       };
     }, {} as {

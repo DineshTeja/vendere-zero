@@ -75,6 +75,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import remarkGfm from "remark-gfm";
 
 // Update the type for original headlines
 type OriginalHeadline = {
@@ -2038,7 +2039,12 @@ export default function Automations() {
                                                         />
                                                       </div>
                                                       <div className="text-sm text-muted-foreground">
-                                                        <ReactMarkdown>
+                                                        <ReactMarkdown
+                                                          remarkPlugins={[
+                                                            remarkGfm,
+                                                          ]}
+                                                          className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                        >
                                                           {
                                                             selectedVariant
                                                               .overall_success_likelihood
@@ -2108,7 +2114,12 @@ export default function Automations() {
                                                         />
                                                       </div>
                                                       <div className="text-sm text-muted-foreground">
-                                                        <ReactMarkdown>
+                                                        <ReactMarkdown
+                                                          remarkPlugins={[
+                                                            remarkGfm,
+                                                          ]}
+                                                          className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                        >
                                                           {
                                                             selectedVariant
                                                               .predicted_ctr
@@ -2145,7 +2156,12 @@ export default function Automations() {
                                                       </div>
                                                     </div>
                                                     <div className="text-sm text-muted-foreground">
-                                                      <ReactMarkdown>
+                                                      <ReactMarkdown
+                                                        remarkPlugins={[
+                                                          remarkGfm,
+                                                        ]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                      >
                                                         {
                                                           selectedVariant
                                                             .predicted_impressions
@@ -2181,7 +2197,12 @@ export default function Automations() {
                                                       </div>
                                                     </div>
                                                     <div className="text-sm text-muted-foreground">
-                                                      <ReactMarkdown>
+                                                      <ReactMarkdown
+                                                        remarkPlugins={[
+                                                          remarkGfm,
+                                                        ]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                      >
                                                         {
                                                           selectedVariant
                                                             .predicted_clicks
@@ -2218,7 +2239,12 @@ export default function Automations() {
                                                       </div>
                                                     </div>
                                                     <div className="text-sm text-muted-foreground">
-                                                      <ReactMarkdown>
+                                                      <ReactMarkdown
+                                                        remarkPlugins={[
+                                                          remarkGfm,
+                                                        ]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-medium prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:font-medium prose-strong:text-primary prose-a:text-primary hover:prose-a:underline prose-code:text-muted-foreground prose-code:bg-muted prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-ul:my-2 prose-li:my-0 prose-p:my-1.5 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                                                      >
                                                         {
                                                           selectedVariant
                                                             .predicted_conversions
