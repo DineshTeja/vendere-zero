@@ -14,6 +14,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
+  Eye,
+  MousePointerClick,
+  Target,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -64,6 +67,14 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
+import { Progress } from "@/components/ui/progress";
+import ReactMarkdown from "react-markdown";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Update the type for original headlines
 type OriginalHeadline = {
@@ -180,6 +191,17 @@ type Headline = {
     bottom_left: [number, number];
     bottom_right: [number, number];
   };
+};
+
+// Utility function to format large numbers
+const formatCompactNumber = (num: number): string => {
+  if (num >= 1000000) {
+    return `${(num / 1000000).toFixed(1)}M`;
+  }
+  if (num >= 1000) {
+    return `${(num / 1000).toFixed(1)}k`;
+  }
+  return num.toString();
 };
 
 // Component to handle ad image display with ad blocker consideration
@@ -559,6 +581,18 @@ type HeadlineVariant = {
   }>;
   created_at: string;
   updated_at: string;
+  overall_success_likelihood: { metric: number; reason: string };
+  predicted_impressions: { metric: number; reason: string };
+  predicted_clicks: { metric: number; reason: string };
+  predicted_ctr: { metric: number; reason: string };
+  predicted_conversions: { metric: number; reason: string };
+};
+
+type OriginalAdMetrics = {
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  conversions: number;
 };
 
 export default function Automations() {
@@ -663,6 +697,64 @@ export default function Automations() {
   // Get the selected ad
   const selectedAd =
     selectedAdIndex !== null ? adVariants[selectedAdIndex] : null;
+
+  // Get the original metrics for the selected ad
+  const [originalMetrics, setOriginalMetrics] =
+    useState<OriginalAdMetrics | null>(null);
+
+  useEffect(() => {
+    const fetchOriginalMetrics = async () => {
+      if (!selectedAd) {
+        setOriginalMetrics(null);
+        return;
+      }
+
+      try {
+        const { data: libraryData, error: libraryError } = await supabase
+          .from("library_items")
+          .select("*")
+          .eq("preview_url", selectedAd.li_preview_url)
+          .single();
+
+        if (libraryError) {
+          console.error("Error fetching library item:", libraryError);
+          setOriginalMetrics(null);
+          return;
+        }
+
+        if (!libraryData) {
+          console.error("No library item found for the selected ad");
+          setOriginalMetrics(null);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("enhanced_ad_metrics")
+          .select("impressions, clicks, ctr, conversions")
+          .eq("ad_id", libraryData.id)
+          .single();
+
+        if (error) {
+          console.error("Error fetching original metrics:", error);
+          setOriginalMetrics(null);
+          return;
+        }
+
+        if (!data) {
+          console.error("No original metrics found for the selected ad");
+          setOriginalMetrics(null);
+          return;
+        }
+
+        setOriginalMetrics(data);
+      } catch (err) {
+        console.error("Error fetching original metrics:", err);
+        setOriginalMetrics(null);
+      }
+    };
+
+    fetchOriginalMetrics();
+  }, [selectedAd]);
 
   // Fetch ad variants from Supabase
   const fetchAdVariants = async () => {
@@ -1268,6 +1360,15 @@ export default function Automations() {
                                             )
                                           )
                                         )}
+                                      <TableHead className="text-right">
+                                        Success
+                                      </TableHead>
+                                      <TableHead className="text-right">
+                                        CTR
+                                      </TableHead>
+                                      <TableHead className="text-right">
+                                        Metrics
+                                      </TableHead>
                                       <TableHead className="w-[50px]"></TableHead>
                                     </TableRow>
                                   </TableHeader>
@@ -1296,6 +1397,82 @@ export default function Automations() {
                                                 </div>
                                               </TableCell>
                                             )
+                                          )}
+                                          {originalMetrics && (
+                                            <>
+                                              <TableCell>
+                                                {/* Skip success likelihood for original metrics */}
+                                              </TableCell>
+                                              <TableCell>
+                                                <div className="flex items-center gap-2">
+                                                  <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
+                                                    <div
+                                                      className={cn(
+                                                        "h-full transition-all",
+                                                        originalMetrics.ctr >=
+                                                          0.05
+                                                          ? "bg-green-500"
+                                                          : originalMetrics.ctr >=
+                                                            0.02
+                                                          ? "bg-yellow-500"
+                                                          : "bg-red-500"
+                                                      )}
+                                                      style={{
+                                                        width: `${
+                                                          originalMetrics.ctr *
+                                                          1000
+                                                        }%`,
+                                                      }}
+                                                    />
+                                                  </div>
+                                                  <span
+                                                    className={cn(
+                                                      "text-xs tabular-nums font-medium",
+                                                      originalMetrics.ctr >=
+                                                        0.05
+                                                        ? "text-green-600"
+                                                        : originalMetrics.ctr >=
+                                                          0.02
+                                                        ? "text-yellow-600"
+                                                        : "text-red-600"
+                                                    )}
+                                                  >
+                                                    {(
+                                                      originalMetrics.ctr * 100
+                                                    ).toFixed(2)}
+                                                    %
+                                                  </span>
+                                                </div>
+                                              </TableCell>
+                                              <TableCell>
+                                                <div className="space-y-1.5">
+                                                  <div className="flex items-center gap-2">
+                                                    <Eye className="h-3 w-3 text-blue-500" />
+                                                    <span className="text-xs tabular-nums font-medium text-blue-600">
+                                                      {formatCompactNumber(
+                                                        originalMetrics.impressions
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <MousePointerClick className="h-3 w-3 text-violet-500" />
+                                                    <span className="text-xs tabular-nums font-medium text-violet-600">
+                                                      {formatCompactNumber(
+                                                        originalMetrics.clicks
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <Target className="h-3 w-3 text-green-500" />
+                                                    <span className="text-xs tabular-nums font-medium text-green-600">
+                                                      {formatCompactNumber(
+                                                        originalMetrics.conversions
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              </TableCell>
+                                            </>
                                           )}
                                         </TableRow>
                                       ))}
@@ -1330,6 +1507,217 @@ export default function Automations() {
                                               </TableCell>
                                             )
                                           )}
+                                          <TableCell>
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
+                                                <div
+                                                  className={cn(
+                                                    "h-full transition-all",
+                                                    variant
+                                                      .overall_success_likelihood
+                                                      .metric >= 75
+                                                      ? "bg-green-500"
+                                                      : variant
+                                                          .overall_success_likelihood
+                                                          .metric >= 50
+                                                      ? "bg-yellow-500"
+                                                      : "bg-red-500"
+                                                  )}
+                                                  style={{
+                                                    width: `${
+                                                      variant
+                                                        .overall_success_likelihood
+                                                        .metric || 0
+                                                    }%`,
+                                                  }}
+                                                />
+                                              </div>
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <span
+                                                      className={cn(
+                                                        "text-xs tabular-nums font-medium cursor-help",
+                                                        variant
+                                                          .overall_success_likelihood
+                                                          .metric >= 75
+                                                          ? "text-green-600"
+                                                          : variant
+                                                              .overall_success_likelihood
+                                                              .metric >= 50
+                                                          ? "text-yellow-600"
+                                                          : "text-red-600"
+                                                      )}
+                                                    >
+                                                      {variant.overall_success_likelihood.metric?.toFixed(
+                                                        1
+                                                      )}
+                                                      %
+                                                    </span>
+                                                  </TooltipTrigger>
+                                                  <TooltipContent
+                                                    side="top"
+                                                    className="max-w-[300px] p-3"
+                                                  >
+                                                    <ReactMarkdown>
+                                                      {
+                                                        variant
+                                                          .overall_success_likelihood
+                                                          .reason
+                                                      }
+                                                    </ReactMarkdown>
+                                                  </TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-full max-w-[100px] h-2 rounded-full bg-muted overflow-hidden">
+                                                <div
+                                                  className={cn(
+                                                    "h-full transition-all",
+                                                    variant.predicted_ctr
+                                                      .metric >= 5
+                                                      ? "bg-green-500"
+                                                      : variant.predicted_ctr
+                                                          .metric >= 2
+                                                      ? "bg-yellow-500"
+                                                      : "bg-red-500"
+                                                  )}
+                                                  style={{
+                                                    width: `${
+                                                      variant.predicted_ctr
+                                                        .metric * 10 || 0
+                                                    }%`,
+                                                  }}
+                                                />
+                                              </div>
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <span
+                                                      className={cn(
+                                                        "text-xs tabular-nums font-medium cursor-help",
+                                                        variant.predicted_ctr
+                                                          .metric >= 5
+                                                          ? "text-green-600"
+                                                          : variant
+                                                              .predicted_ctr
+                                                              .metric >= 2
+                                                          ? "text-yellow-600"
+                                                          : "text-red-600"
+                                                      )}
+                                                    >
+                                                      {variant.predicted_ctr.metric?.toFixed(
+                                                        2
+                                                      )}
+                                                      %
+                                                    </span>
+                                                  </TooltipTrigger>
+                                                  <TooltipContent
+                                                    side="top"
+                                                    className="max-w-[300px] p-3"
+                                                  >
+                                                    <ReactMarkdown>
+                                                      {
+                                                        variant.predicted_ctr
+                                                          .reason
+                                                      }
+                                                    </ReactMarkdown>
+                                                  </TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <div className="space-y-1.5">
+                                              <div className="flex items-center gap-2">
+                                                <Eye className="h-3 w-3 text-blue-500" />
+                                                <TooltipProvider>
+                                                  <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                      <span className="text-xs tabular-nums font-medium text-blue-600 cursor-help">
+                                                        {formatCompactNumber(
+                                                          variant
+                                                            .predicted_impressions
+                                                            .metric
+                                                        )}
+                                                      </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                      side="top"
+                                                      className="max-w-[300px] p-3"
+                                                    >
+                                                      <ReactMarkdown>
+                                                        {
+                                                          variant
+                                                            .predicted_impressions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </TooltipContent>
+                                                  </Tooltip>
+                                                </TooltipProvider>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <MousePointerClick className="h-3 w-3 text-violet-500" />
+                                                <TooltipProvider>
+                                                  <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                      <span className="text-xs tabular-nums font-medium text-violet-600 cursor-help">
+                                                        {formatCompactNumber(
+                                                          variant
+                                                            .predicted_clicks
+                                                            .metric
+                                                        )}
+                                                      </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                      side="top"
+                                                      className="max-w-[300px] p-3"
+                                                    >
+                                                      <ReactMarkdown>
+                                                        {
+                                                          variant
+                                                            .predicted_clicks
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </TooltipContent>
+                                                  </Tooltip>
+                                                </TooltipProvider>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <Target className="h-3 w-3 text-green-500" />
+                                                <TooltipProvider>
+                                                  <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                      <span className="text-xs tabular-nums font-medium text-green-600 cursor-help">
+                                                        {formatCompactNumber(
+                                                          variant
+                                                            .predicted_conversions
+                                                            .metric
+                                                        )}
+                                                      </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                      side="top"
+                                                      className="max-w-[300px] p-3"
+                                                    >
+                                                      <ReactMarkdown>
+                                                        {
+                                                          variant
+                                                            .predicted_conversions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </TooltipContent>
+                                                  </Tooltip>
+                                                </TooltipProvider>
+                                              </div>
+                                            </div>
+                                          </TableCell>
                                           <TableCell>
                                             <Button
                                               variant="ghost"
@@ -1588,6 +1976,261 @@ export default function Automations() {
                                                 </div>
                                               </div>
                                             </Card>
+                                          </div>
+
+                                          {/* Performance Metrics Section */}
+                                          <div className="space-y-6">
+                                            <div>
+                                              <h3 className="text-lg font-medium mb-4">
+                                                Performance Metrics
+                                              </h3>
+                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {/* Success Likelihood */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Success Likelihood
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted success rate
+                                                        </p>
+                                                      </div>
+                                                      <div
+                                                        className={cn(
+                                                          "px-2.5 py-0.5 rounded-full text-xs font-semibold",
+                                                          selectedVariant
+                                                            .overall_success_likelihood
+                                                            .metric >= 75
+                                                            ? "bg-green-500/10 text-green-700"
+                                                            : selectedVariant
+                                                                .overall_success_likelihood
+                                                                .metric >= 50
+                                                            ? "bg-yellow-500/10 text-yellow-700"
+                                                            : "bg-red-500/10 text-red-700"
+                                                        )}
+                                                      >
+                                                        {selectedVariant.overall_success_likelihood.metric.toFixed(
+                                                          1
+                                                        )}
+                                                        %
+                                                      </div>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                                                        <div
+                                                          className={cn(
+                                                            "h-full transition-all",
+                                                            selectedVariant
+                                                              .overall_success_likelihood
+                                                              .metric >= 75
+                                                              ? "bg-green-500"
+                                                              : selectedVariant
+                                                                  .overall_success_likelihood
+                                                                  .metric >= 50
+                                                              ? "bg-yellow-500"
+                                                              : "bg-red-500"
+                                                          )}
+                                                          style={{
+                                                            width: `${selectedVariant.overall_success_likelihood.metric}%`,
+                                                          }}
+                                                        />
+                                                      </div>
+                                                      <div className="text-sm text-muted-foreground">
+                                                        <ReactMarkdown>
+                                                          {
+                                                            selectedVariant
+                                                              .overall_success_likelihood
+                                                              .reason
+                                                          }
+                                                        </ReactMarkdown>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-muted/50 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* CTR */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Click-Through Rate
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted engagement
+                                                        </p>
+                                                      </div>
+                                                      <div
+                                                        className={cn(
+                                                          "px-2.5 py-0.5 rounded-full text-xs font-semibold",
+                                                          selectedVariant
+                                                            .predicted_ctr
+                                                            .metric >= 5
+                                                            ? "bg-green-500/10 text-green-700"
+                                                            : selectedVariant
+                                                                .predicted_ctr
+                                                                .metric >= 2
+                                                            ? "bg-yellow-500/10 text-yellow-700"
+                                                            : "bg-red-500/10 text-red-700"
+                                                        )}
+                                                      >
+                                                        {selectedVariant.predicted_ctr.metric.toFixed(
+                                                          2
+                                                        )}
+                                                        %
+                                                      </div>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                                                        <div
+                                                          className={cn(
+                                                            "h-full transition-all",
+                                                            selectedVariant
+                                                              .predicted_ctr
+                                                              .metric >= 5
+                                                              ? "bg-green-500"
+                                                              : selectedVariant
+                                                                  .predicted_ctr
+                                                                  .metric >= 2
+                                                              ? "bg-yellow-500"
+                                                              : "bg-red-500"
+                                                          )}
+                                                          style={{
+                                                            width: `${
+                                                              selectedVariant
+                                                                .predicted_ctr
+                                                                .metric * 10
+                                                            }%`,
+                                                          }}
+                                                        />
+                                                      </div>
+                                                      <div className="text-sm text-muted-foreground">
+                                                        <ReactMarkdown>
+                                                          {
+                                                            selectedVariant
+                                                              .predicted_ctr
+                                                              .reason
+                                                          }
+                                                        </ReactMarkdown>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-muted/50 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* Impressions */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Impressions
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted reach
+                                                        </p>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <Eye className="h-4 w-4 text-blue-500" />
+                                                        <span className="text-sm font-semibold text-blue-700">
+                                                          {formatCompactNumber(
+                                                            selectedVariant
+                                                              .predicted_impressions
+                                                              .metric
+                                                          )}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                      <ReactMarkdown>
+                                                        {
+                                                          selectedVariant
+                                                            .predicted_impressions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-blue-500/5 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* Clicks */}
+                                                <Card className="p-6 relative overflow-hidden">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Clicks
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted interactions
+                                                        </p>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <MousePointerClick className="h-4 w-4 text-violet-500" />
+                                                        <span className="text-sm font-semibold text-violet-700">
+                                                          {formatCompactNumber(
+                                                            selectedVariant
+                                                              .predicted_clicks
+                                                              .metric
+                                                          )}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                      <ReactMarkdown>
+                                                        {
+                                                          selectedVariant
+                                                            .predicted_clicks
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-violet-500/5 to-transparent opacity-50" />
+                                                </Card>
+
+                                                {/* Conversions */}
+                                                <Card className="p-6 relative overflow-hidden col-span-2">
+                                                  <div className="relative z-10">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                      <div className="space-y-1">
+                                                        <h4 className="text-sm font-medium">
+                                                          Conversions
+                                                        </h4>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          Predicted successful
+                                                          outcomes
+                                                        </p>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <Target className="h-4 w-4 text-green-500" />
+                                                        <span className="text-sm font-semibold text-green-700">
+                                                          {formatCompactNumber(
+                                                            selectedVariant
+                                                              .predicted_conversions
+                                                              .metric
+                                                          )}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                      <ReactMarkdown>
+                                                        {
+                                                          selectedVariant
+                                                            .predicted_conversions
+                                                            .reason
+                                                        }
+                                                      </ReactMarkdown>
+                                                    </div>
+                                                  </div>
+                                                  <div className="absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-green-500/5 to-transparent opacity-50" />
+                                                </Card>
+                                              </div>
+                                            </div>
                                           </div>
 
                                           {/* Rules Used Section */}

@@ -16,6 +16,7 @@ from transformers import AutoModelForCausalLM, AutoProcessor  # type: ignore[imp
 from pydantic import BaseModel
 from scripts.hf_models import (
     florence_model,
+    get_text_from_image_url,
     load_florence_model,
     get_image_from_url,
     parse_florence_result,
@@ -252,30 +253,17 @@ async def detect_text_endpoint(request: OCRRequest):
     try:
         logger.info(f"Processing image URL: {request.image_url}")
 
-        # Get image from URL
-        try:
-            image = get_image_from_url(request.image_url)
-            logger.info(
-                f"Image loaded successfully. Mode: {image.mode}, Size: {image.size}"
-            )
-        except Exception as e:
-            logger.error(f"Error fetching image: {str(e)}")
-            raise HTTPException(
-                status_code=400, detail=f"Failed to fetch image from URL: {str(e)}"
-            )
-
         # Process with Florence model
         try:
             # Set max execution time to 30 seconds
             max_execution_time = 30
 
-            result = florence_model(image)
-            structured_result = parse_florence_result(result)
+            result = get_text_from_image_url(request.image_url)
 
             logger.info(
-                f"Successfully processed image, found {len(structured_result)} text regions"
+                f"Successfully processed image, found {len(result)} text regions"
             )
-            return structured_result
+            return result
 
         except asyncio.TimeoutError:
             logger.error("OCR processing timed out")

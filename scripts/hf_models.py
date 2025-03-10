@@ -145,6 +145,14 @@ def parse_florence_result(result: dict) -> List[TextRegion]:
     return text_regions
 
 
+@lru_cache(maxsize=100)
+def get_text_from_image_url(url: str) -> List[TextRegion]:
+    image = get_image_from_url(url)
+    model_result = florence_model(image)
+    parsed_result = parse_florence_result(model_result)
+    return parsed_result
+
+
 def draw_bounding_boxes(
     image: Image.Image, text_regions: List[TextRegion]
 ) -> Image.Image:
