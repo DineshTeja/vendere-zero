@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { FaGoogle, FaHubspot, FaSalesforce } from "react-icons/fa6";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -403,6 +404,18 @@ export default function MaterialsComponent() {
                                         <DropdownMenuItem className="flex items-center">
                                             <Globe className="h-4 w-4 mr-2" />
                                             Add from Notion
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem className="flex items-center">
+                                            <FaHubspot className="h-4 w-4 mr-2" />
+                                            Add from Hubspot
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem className="flex items-center">
+                                            <FaGoogle className="h-4 w-4 mr-2" />
+                                            Add from Google Analytics
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem className="flex items-center">    
+                                            <FaSalesforce className="h-4 w-4 mr-2"/>
+                                            Add from Salesforce
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>

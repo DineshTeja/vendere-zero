@@ -14,11 +14,11 @@ import asyncio
 import time
 from pydantic import BaseModel
 
-from hf_models import (
-    get_text_from_image_url,
-    load_florence_model,
-    TextRegion,
-)
+# from hf_models import (
+#     get_text_from_image_url,
+#     load_florence_model,
+#     TextRegion,
+# )
 from base_queries import KnowledgeBase, QueryRequest
 from market_view import (
     MarketResearchAnalyzer,
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     kb = KnowledgeBase()
     # market_analyzer = MarketResearchAnalyzer()
     # variant_generator = VariantGenerator()
-    load_florence_model()
+    # load_florence_model()
     # keyword_generator = KeywordVariantGenerator()
     logger.info("Services initialized successfully")
 
@@ -242,43 +242,43 @@ class OCRRequest(BaseModel):
     image_url: str
 
 
-# Add new endpoint
-@app.post("/ocr/detect", response_model=List[TextRegion])
-async def detect_text_endpoint(request: OCRRequest):
-    """Detect and extract text from an image using Florence model"""
-    try:
-        logger.info(f"Processing image URL: {request.image_url}")
+# # Add new endpoint
+# @app.post("/ocr/detect", response_model=List[TextRegion])
+# async def detect_text_endpoint(request: OCRRequest):
+#     """Detect and extract text from an image using Florence model"""
+#     try:
+#         logger.info(f"Processing image URL: {request.image_url}")
 
-        # Process with Florence model
-        try:
-            # Set max execution time to 30 seconds
-            max_execution_time = 30
+#         # Process with Florence model
+#         try:
+#             # Set max execution time to 30 seconds
+#             max_execution_time = 30
 
-            result = get_text_from_image_url(request.image_url)
+#             result = get_text_from_image_url(request.image_url)
 
-            logger.info(
-                f"Successfully processed image, found {len(result)} text regions"
-            )
-            return result
+#             logger.info(
+#                 f"Successfully processed image, found {len(result)} text regions"
+#             )
+#             return result
 
-        except asyncio.TimeoutError:
-            logger.error("OCR processing timed out")
-            raise HTTPException(
-                status_code=408,
-                detail=f"OCR processing timed out after {max_execution_time} seconds",
-            )
-        except Exception as e:
-            logger.error(f"Error processing image with Florence model: {str(e)}")
-            print_exc()
-            raise HTTPException(
-                status_code=500, detail=f"Failed to process image: {str(e)}"
-            )
+#         except asyncio.TimeoutError:
+#             logger.error("OCR processing timed out")
+#             raise HTTPException(
+#                 status_code=408,
+#                 detail=f"OCR processing timed out after {max_execution_time} seconds",
+#             )
+#         except Exception as e:
+#             logger.error(f"Error processing image with Florence model: {str(e)}")
+#             print_exc()
+#             raise HTTPException(
+#                 status_code=500, detail=f"Failed to process image: {str(e)}"
+#             )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in detect_text_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Unexpected error in detect_text_endpoint: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():
