@@ -8,18 +8,14 @@ import uvicorn
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 import os
 import asyncio
 import time
-from transformers import AutoModelForCausalLM, AutoProcessor  # type: ignore[import-untyped]
 from pydantic import BaseModel
-from scripts.hf_models import (
-    florence_model,
+from hf_models import (
     get_text_from_image_url,
     load_florence_model,
-    get_image_from_url,
-    parse_florence_result,
     TextRegion,
 )
 
@@ -32,12 +28,12 @@ from scripts.knowledge.market_view import (
 )
 from scripts.knowledge.variants import VariantGenerator, VariantInput, GeneratedVariant
 
-# Import KeywordVariantGenerator and related models
-from scripts.knowledge.keyword_variants import (
-    # KeywordVariantGenerator,
-    AdFeatures,
-    KeywordVariant,
-)
+# # Import KeywordVariantGenerator and related models
+# from scripts.knowledge.keyword_variants import (
+#     # KeywordVariantGenerator,
+#     AdFeatures,
+#     KeywordVariant,
+# )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,9 +46,10 @@ load_dotenv(env_path)
 async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI"""
     global kb, market_analyzer, variant_generator, keyword_generator
+    os.environ["TRANSFORMERS_FRAMEWORK"] = "pt"
 
     logger.info("Initializing services...")
-    # kb = KnowledgeBase()
+    kb = KnowledgeBase()
     # market_analyzer = MarketResearchAnalyzer()
     # variant_generator = VariantGenerator()
     load_florence_model()

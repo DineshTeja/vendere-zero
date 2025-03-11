@@ -896,8 +896,9 @@ Cost/Conv: {metric["cost_per_conversion"] if metric["cost_per_conversion"] is no
 Clicks: {metric["total_clicks"] if metric["total_clicks"] is not None else "N/A"}
 Impressions: {metric["total_impressions"] if metric["total_impressions"] is not None else "N/A"}
 Conversions: {metric["total_conversions"] if metric["total_conversions"] is not None else "N/A"}
-Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}"""
-
+Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}
+Ad Description: {metric["ad_description"] if metric["ad_description"] is not None else "N/A"}"""
+                
                 doc = Document(
                     text=metric_text,
                     extra_info={
