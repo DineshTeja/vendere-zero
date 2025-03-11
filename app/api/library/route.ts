@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+// Helper for caching API responses to reduce database load
+const API_CACHE = new Map();
+const CACHE_TTL = 30000; // 30 seconds cache
+
 export async function GET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
@@ -8,6 +12,15 @@ export async function GET(request: Request) {
         const pageSize = parseInt(searchParams.get('pageSize') || '10');
         const start = (page - 1) * pageSize;
         const end = start + pageSize - 1;
+
+        // Create cache key based on request parameters
+        const cacheKey = `library_${page}_${pageSize}`;
+        
+        // Check if we have a valid cached response
+        const cachedData = API_CACHE.get(cacheKey);
+        if (cachedData && cachedData.timestamp > Date.now() - CACHE_TTL) {
+            return NextResponse.json(cachedData.data);
+        }
 
         const supabase = createServerSupabaseClient();
         const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -65,13 +78,22 @@ export async function GET(request: Request) {
             })()
         }));
 
-        return NextResponse.json({
+        // Create response data
+        const responseData = {
             items: transformedItems,
             total: countResult.count,
             page,
             pageSize,
             totalPages: Math.ceil((countResult.count || 0) / pageSize)
+        };
+
+        // Cache the response
+        API_CACHE.set(cacheKey, {
+            data: responseData,
+            timestamp: Date.now()
         });
+
+        return NextResponse.json(responseData);
     } catch (error) {
         console.error("Error fetching library data:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

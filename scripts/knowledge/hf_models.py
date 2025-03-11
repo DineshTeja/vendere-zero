@@ -1,6 +1,6 @@
 from functools import lru_cache
 from io import BytesIO
-from typing import TypedDict, List
+from typing_extensions import TypedDict, List, Tuple
 
 import requests
 from PIL import Image, ImageDraw, ImageFont  # type: ignore[import-untyped]
@@ -9,11 +9,11 @@ from transformers import AutoProcessor, AutoModelForCausalLM  # type: ignore[imp
 
 # Type definitions for better structure
 class BoundingBox(TypedDict):
-    top_left: tuple[float, float]
-    top_right: tuple[float, float]
-    bottom_right: tuple[float, float]
-    bottom_left: tuple[float, float]
-    center: tuple[float, float]
+    top_left: Tuple[float, float]
+    top_right: Tuple[float, float]
+    bottom_right: Tuple[float, float]
+    bottom_left: Tuple[float, float]
+    center: Tuple[float, float]
     width: float
     height: float
 
@@ -26,7 +26,7 @@ class TextRegion(TypedDict):
 
 
 @lru_cache(maxsize=1)
-def load_florence_model() -> tuple[AutoModelForCausalLM, AutoProcessor]:
+def load_florence_model() -> Tuple[AutoModelForCausalLM, AutoProcessor]:
     model_id = "microsoft/Florence-2-large"
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)

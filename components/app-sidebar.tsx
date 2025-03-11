@@ -9,9 +9,7 @@ import {
   GlobeIcon,
   LibraryBigIcon,
   BarChart3Icon,
-  KeyboardIcon,
   Settings,
-  ImageIcon,
 } from "lucide-react";
 import { LayoutGroup } from "framer-motion";
 
@@ -73,11 +71,11 @@ const getNavData = () => ({
     //   url: "/ad-variants",
     //   icon: PlusCircleIcon,
     // },
-    {
-      title: "Brand Materials",
-      url: "/material",
-      icon: ImageIcon,
-    },
+    // {
+    //   title: "Brand Materials",
+    //   url: "/material",
+    //   icon: ImageIcon,
+    // },
     {
       title: "Automations",
       url: "/automations",
@@ -118,11 +116,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const router = useRouter();
   const data = React.useMemo(() => getNavData(), []);
 
-  // Prefetch the library page to improve navigation performance
+  // Enhanced prefetching strategy for all main navigation items
   useEffect(() => {
-    // Prefetch the library page when the sidebar mounts
-    router.prefetch("/library");
-  }, [router]);
+    // Prefetch all main navigation routes for instant transitions
+    data.navMain.forEach(item => {
+      router.prefetch(item.url);
+    });
+  }, [router, data.navMain]);
 
   // Remove console.log statements for better performance
   const items = React.useMemo(() => {
@@ -135,6 +135,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // Optimization: capture click events and use router.push for navigation
   const handleNavItemClick = React.useCallback(
     (url: string) => {
+      // Push navigation immediately and let the page show loading state
       router.push(url);
     },
     [router]

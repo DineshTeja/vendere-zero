@@ -20,13 +20,15 @@ export interface Source {
         image_url?: string;
         name?: string;
         domain?: string;
-        raw_data?: any; // For attribution data
+        raw_data?: Record<string, unknown>; // Replace 'any' with a more specific type
     };
 }
 
 interface MessageSourcesProps {
     sources: Source[];
     citations?: string[];
+    onFeaturedImagesChange?: (imageUrls: string[]) => void;
+    featuredImages?: string[];
 }
 
 interface SourceRecord {
@@ -72,12 +74,62 @@ function getFaviconUrl(domain: string): string {
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
 }
 
-export function MessageSources({ sources, citations = [] }: MessageSourcesProps) {
+export function MessageSources({
+    sources,
+    citations = [],
+    onFeaturedImagesChange,
+    featuredImages = []
+}: MessageSourcesProps) {
     const [isVisible, setIsVisible] = useState(true);
     const [sourceRecords, setSourceRecords] = useState<Record<string, SourceRecord>>({});
     const [isLoading, setIsLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'citations' | 'sources'>('citations');
+    const [selectedImages, setSelectedImages] = useState<string[]>(featuredImages);
     const totalItems = sources.length + citations.length;
+
+    // Update parent component when selected images change
+    useEffect(() => {
+        if (onFeaturedImagesChange && JSON.stringify(selectedImages) !== JSON.stringify(featuredImages)) {
+            onFeaturedImagesChange(selectedImages);
+        }
+    }, [selectedImages, onFeaturedImagesChange, featuredImages]);
+
+    // Sync with featuredImages prop if it changes externally
+    useEffect(() => {
+        if (JSON.stringify(featuredImages) !== JSON.stringify(selectedImages)) {
+            setSelectedImages(featuredImages);
+        }
+    }, [featuredImages]);
+
+    // Auto-populate selectedImages with available image URLs when sources are loaded
+    useEffect(() => {
+        if (sources && sources.length > 0 && selectedImages.length === 0) {
+            // Extract all available image URLs from sources
+            const availableImageUrls = sources
+                .map(source => source.extra_info?.image_url)
+                .filter((url): url is string => !!url);
+
+            // Only auto-select images if user hasn't made selections yet
+            if (availableImageUrls.length > 0 && selectedImages.length === 0) {
+                setSelectedImages(availableImageUrls);
+                // Notify parent component about the initial selection
+                if (onFeaturedImagesChange) {
+                    onFeaturedImagesChange(availableImageUrls);
+                }
+            }
+        }
+    }, [sources, selectedImages.length, onFeaturedImagesChange]);
+
+    // Toggle an image's selected state
+    const toggleImageSelection = (imageUrl: string) => {
+        setSelectedImages(prev => {
+            if (prev.includes(imageUrl)) {
+                return prev.filter(url => url !== imageUrl);
+            } else {
+                return [...prev, imageUrl];
+            }
+        });
+    };
 
     useEffect(() => {
         async function fetchSourceRecords() {
@@ -182,7 +234,7 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
 
                         if (adMetricsData && adMetricsData.length > 0) {
                             // Get unique ad IDs
-                            const adIds = [...new Set(adMetricsData.map(item => item.ad_id))];
+                            const adIds = Array.from(new Set(adMetricsData.map(item => item.ad_id)));
 
                             // Fetch library items for these ad IDs
                             const { data: adLibraryData } = await supabase
@@ -239,10 +291,23 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
 
             setSourceRecords(recordsMap);
             setIsLoading(false);
+
+            // After records are loaded, extract and auto-select image URLs
+            const recordImageUrls = Object.values(recordsMap)
+                .map(record => record.image_url)
+                .filter((url): url is string => !!url);
+
+            if (recordImageUrls.length > 0 && selectedImages.length === 0) {
+                setSelectedImages(recordImageUrls);
+                // Notify parent component about the initial selection
+                if (onFeaturedImagesChange) {
+                    onFeaturedImagesChange(recordImageUrls);
+                }
+            }
         }
 
         fetchSourceRecords();
-    }, [sources]);
+    }, [sources, selectedImages.length, onFeaturedImagesChange]);
 
     if (!totalItems) {
         return null;
@@ -359,6 +424,10 @@ export function MessageSources({ sources, citations = [] }: MessageSourcesProps)
                                             source={source}
                                             record={sourceRecords[source.extra_info.id]}
                                             isLoading={isLoading}
+                                            isImageFeatured={source.extra_info.image_url ?
+                                                selectedImages.includes(source.extra_info.image_url) : false}
+                                            onToggleFeature={source.extra_info.image_url ?
+                                                () => toggleImageSelection(source.extra_info.image_url as string) : undefined}
                                         />
                                     ))}
                                 </motion.div>
@@ -436,10 +505,18 @@ function CitationCard({ citation, index }: { citation: string; index: number }) 
     );
 }
 
-function SourceCard({ source, record, isLoading }: {
+function SourceCard({
+    source,
+    record,
+    isLoading,
+    isImageFeatured,
+    onToggleFeature
+}: {
     source: Source;
     record?: SourceRecord;
     isLoading: boolean;
+    isImageFeatured?: boolean;
+    onToggleFeature?: () => void;
 }) {
     const { type, id, url, image_url: sourceImageUrl, name, domain } = source.extra_info;
 
@@ -479,14 +556,34 @@ function SourceCard({ source, record, isLoading }: {
         <div className="flex flex-col rounded-none bg-background/30 hover:bg-background/50 transition-colors border border-border/30 min-w-[200px] w-[200px] overflow-hidden flex-shrink-0 snap-start">
             {/* Header without index number */}
             <div className="flex items-center p-1 border-b border-border/20">
-                <div className="relative h-6 w-6 rounded-sm overflow-hidden mr-3 flex-shrink-0 bg-background/50 flex items-center justify-center">
+                <div className={`relative h-6 w-6 rounded-sm overflow-hidden mr-3 flex-shrink-0 bg-background/50 flex items-center justify-center ${isImageFeatured ? 'ring-1 ring-primary' : ''}`}>
                     {imageUrl ? (
-                        <Image
-                            src={imageUrl}
-                            alt={displayName}
-                            fill
-                            className="object-cover"
-                        />
+                        <>
+                            <Image
+                                src={imageUrl}
+                                alt={displayName}
+                                fill
+                                className="object-cover"
+                            />
+                            {onToggleFeature && (
+                                <div
+                                    className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onToggleFeature();
+                                    }}
+                                    title={isImageFeatured ? "Remove from featured images" : "Add to featured images"}
+                                >
+                                    <div className={`h-4 w-4 rounded-full border ${isImageFeatured ? 'bg-primary border-primary' : 'border-white/60'} flex items-center justify-center`}>
+                                        {isImageFeatured && (
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     ) : (
                         <SourceIcon type={type} />
                     )}

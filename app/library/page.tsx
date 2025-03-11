@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, Suspense, lazy } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { Video, MoreHorizontal, Trash2, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Video, MoreHorizontal, Trash2, Image as ImageIcon, Loader2, File } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { ColumnDef } from "@tanstack/react-table";
 import { supabase } from "@/lib/supabase";
@@ -14,9 +14,17 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { motion } from "framer-motion";
+import MaterialsComponent from "@/app/components/MaterialsComponent";
 
-// Dynamically import the DataTable component
-const DataTable = lazy(() => import("@/components/ui/data-table").then(mod => ({ default: mod.DataTable })));
+// Fix the dynamic import for DataTable
+// Since DataTable is a named export, we need to properly handle it with lazy
+const DataTableLoader = lazy(() =>
+    import("@/components/ui/data-table").then(module => ({
+        default: module.DataTable
+    }))
+);
 
 type LibraryItem = {
     id: string;
@@ -36,6 +44,12 @@ type LibraryItem = {
     };
     created_at: string;
 };
+
+// // Add types for DataTable filtering/row functions
+// type TableRow = {
+//     getValue: <T>(columnId: string) => T;
+//     original: LibraryItem;
+// };
 
 type UploadingFile = {
     id: string;
@@ -58,10 +72,45 @@ type PaginatedResponse = {
 
 // Loading component to show while the data is being fetched
 const LibraryLoading = () => (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center">
-        <div className="flex items-center gap-2">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <span className="text-lg">Loading library...</span>
+    <div className="min-h-screen bg-background">
+        <div className="px-4 mx-auto">
+            <div className="border-0 bg-card">
+                <div className="container mx-auto p-4">
+                    <div className="flex flex-col space-y-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <div className="h-8 w-64 bg-muted rounded-md animate-pulse"></div>
+                            <div className="h-8 w-24 bg-muted rounded-md animate-pulse"></div>
+                        </div>
+                        <div className="flex gap-2 mb-4">
+                            <div className="h-8 w-20 bg-muted rounded-md animate-pulse"></div>
+                            <div className="h-8 w-32 bg-muted rounded-md animate-pulse"></div>
+                            <div className="h-8 w-28 bg-muted rounded-md animate-pulse"></div>
+                        </div>
+                        <div className="border rounded-md">
+                            <div className="h-12 border-b flex items-center px-4 bg-muted/20">
+                                <div className="grid grid-cols-7 w-full gap-2">
+                                    {Array(7).fill(0).map((_, i) => (
+                                        <div key={i} className="h-4 bg-muted rounded-md animate-pulse"></div>
+                                    ))}
+                                </div>
+                            </div>
+                            {Array(5).fill(0).map((_, i) => (
+                                <div key={i} className="h-16 border-b px-4 py-2">
+                                    <div className="grid grid-cols-7 w-full gap-2 h-full items-center">
+                                        {Array(7).fill(0).map((_, j) => (
+                                            <div key={j} className="h-4 bg-muted rounded-md animate-pulse"></div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex justify-between items-center mt-2">
+                            <div className="h-6 w-32 bg-muted rounded-md animate-pulse"></div>
+                            <div className="h-8 w-40 bg-muted rounded-md animate-pulse"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 );
@@ -82,6 +131,7 @@ const LibraryPlaceholder = () => (
 export default function Library() {
     const router = useRouter();
     const [isClientReady, setIsClientReady] = useState(false);
+    const [isDataInitialized, setIsDataInitialized] = useState(false);
     const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
     const [confidenceRange, setConfidenceRange] = useState<[number, number]>([0, 100]);
     const [selectedTones, setSelectedTones] = useState<string[]>([]);
@@ -93,44 +143,54 @@ export default function Library() {
     const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set([1]));
     const [cachedRecords, setCachedRecords] = useState<Record<number, LibraryItem[]>>({});
     const [selectedType, setSelectedType] = useState<string[]>([]);
+    const [activeTab, setActiveTab] = useState("advertisements");
 
     // Set client-side rendering flag after component mounts
     useEffect(() => {
         setIsClientReady(true);
+        // Defer data fetching to not block initial render
+        const timer = setTimeout(() => {
+            fetchLibraryData(page);
+        }, 0);
+
+        return () => clearTimeout(timer);
     }, []);
 
-    useEffect(() => {
-        const fetchLibraryData = async (pageToLoad: number) => {
-            setIsLoading(!cachedRecords[pageToLoad]);
-            try {
-                const response = await fetch(`/api/library?page=${pageToLoad}&pageSize=${pageSize}`);
-                if (!response.ok) throw new Error("Failed to fetch library data");
-                const data: PaginatedResponse = await response.json();
+    const fetchLibraryData = async (pageToLoad: number) => {
+        try {
+            setIsLoading(true);
+            const response = await fetch(`/api/library?page=${pageToLoad}&pageSize=${pageSize}`);
+            if (!response.ok) throw new Error("Failed to fetch library data");
+            const data: PaginatedResponse = await response.json();
 
-                setCachedRecords(prev => ({
-                    ...prev,
-                    [pageToLoad]: data.items
-                }));
-                setLoadedPages(prev => new Set(prev).add(pageToLoad));
+            setCachedRecords(prev => ({
+                ...prev,
+                [pageToLoad]: data.items
+            }));
+            setLoadedPages(prev => new Set(prev).add(pageToLoad));
 
-                if (pageToLoad === page) {
-                    setRecords(data.items);
-                    setTotal(data.total);
-                }
-            } catch (error) {
-                console.error("Error fetching library data:", error);
-            } finally {
-                setIsLoading(false);
+            if (pageToLoad === page) {
+                setRecords(data.items);
+                setTotal(data.total);
             }
-        };
-
-        // Load current page if not cached
-        if (!cachedRecords[page]) {
-            fetchLibraryData(page);
-        } else {
-            setRecords(cachedRecords[page]);
+            setIsDataInitialized(true);
+        } catch (error) {
+            console.error("Error fetching library data:", error);
+        } finally {
+            setIsLoading(false);
         }
-    }, [page, pageSize]);
+    };
+
+    // Load data when page or pageSize changes
+    useEffect(() => {
+        if (isClientReady && isDataInitialized) {
+            if (!cachedRecords[page]) {
+                fetchLibraryData(page);
+            } else {
+                setRecords(cachedRecords[page]);
+            }
+        }
+    }, [page, pageSize, isClientReady, isDataInitialized]);
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
@@ -556,90 +616,241 @@ export default function Library() {
         <div className="min-h-screen bg-background">
             <div className="px-4 mx-auto">
                 <div className="border-0 bg-card">
-                    <Suspense fallback={<LibraryLoading />}>
-                        <DataTable
-                            columns={columns}
-                            data={records}
-                            isLoading={isLoading}
-                            searchPlaceholder="Find content in your library..."
-                            loadedPages={loadedPages}
-                            onLoadPage={handleLoadPage}
-                            serverSidePagination={{
-                                page,
-                                pageSize,
-                                total,
-                                onPageChange: (newPage) => {
-                                    setPage(newPage);
-                                    if (cachedRecords[newPage]) {
-                                        setRecords(cachedRecords[newPage]);
-                                    }
-                                },
-                                onPageSizeChange: setPageSize
-                            }}
-                            onRowClick={(record) => {
-                                if (record.type === 'video') {
-                                    router.push(`/library/video/${record.id}`);
-                                } else {
-                                    router.push(`/library/${record.id}?image_url=${encodeURIComponent(record.image_url || '')}`);
-                                }
-                            }}
-                            filters={[
-                                {
-                                    id: "type",
-                                    label: "Type",
-                                    type: "multiselect",
-                                    options: ["video", "image"],
-                                    value: selectedType,
-                                    filterFn: (row, id, value) => {
-                                        if (!value || (Array.isArray(value) && value.length === 0)) return true;
-                                        const type = row.getValue<string>(id);
-                                        return value.includes(type);
-                                    },
-                                    onValueChange: (value) => setSelectedType(value as string[]),
-                                },
-                                {
-                                    id: "sentiment_confidence",
-                                    label: "Confidence Range",
-                                    type: "range",
-                                    value: confidenceRange,
-                                    filterFn: (row, id, value) => {
-                                        if (!value) return true;
-                                        const [min, max] = value as [number, number];
-                                        const confidence = row.getValue<number>(id);
-                                        return confidence >= min / 100 && confidence <= max / 100;
-                                    },
-                                    onValueChange: (value) => setConfidenceRange(value as [number, number]),
-                                },
-                                {
-                                    id: "sentiment_tone",
-                                    label: "Tones",
-                                    type: "multiselect",
-                                    options: allTones,
-                                    value: selectedTones,
-                                    filterFn: (row, id, value) => {
-                                        if (!value || (Array.isArray(value) && value.length === 0)) return true;
-                                        const tones = row.getValue<string[]>(id);
-                                        return tones.some(tone => value.includes(tone.toLowerCase()));
-                                    },
-                                    onValueChange: (value) => setSelectedTones(value as string[]),
-                                },
-                            ]}
-                            globalFilter={{
-                                placeholder: "Search your creative library...",
-                                searchFn: (row, id, value) => {
-                                    const searchValue = (value as string).toLowerCase();
-                                    const name = String(row.getValue("name") || "").toLowerCase();
-                                    const description = String(row.getValue("image_description") || "").toLowerCase();
-                                    return name.includes(searchValue) || description.includes(searchValue);
-                                },
-                            }}
-                            uploadButton={{
-                                onFileUpload: handleFileUpload,
-                                onCancelUpload: handleCancelUpload,
-                                uploadingFiles
-                            }}
-                        />
-                    </Suspense>
+                    {/* Add tabs here */}
+                    <Tabs
+                        defaultValue="advertisements"
+                        className="w-full"
+                        onValueChange={(value) => setActiveTab(value)}
+                    >
+                        <div className="flex items-center justify-between mb-6 pt-2">
+                            <div className="text-lg font-light tracking-wide text-muted-foreground">
+                                Creative Library
+                            </div>
+
+                            <TabsList className="bg-transparent space-x-2 relative">
+                                {/* Active tab indicator - animated background */}
+                                {activeTab && (
+                                    <motion.div
+                                        className="absolute bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none"
+                                        layoutId="tab-background"
+                                        initial={false}
+                                        transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                                        style={{
+                                            width: "var(--tab-width)",
+                                            height: "var(--tab-height)",
+                                            left: "var(--tab-left)",
+                                            top: "var(--tab-top)",
+                                        }}
+                                    />
+                                )}
+
+                                <TabsTrigger
+                                    value="advertisements"
+                                    className="relative rounded-sm px-2 py-1 text-sm font-medium flex items-center gap-2 z-10 data-[state=active]:bg-transparent"
+                                    ref={(el) => {
+                                        if (el && activeTab === "advertisements") {
+                                            const rect = el.getBoundingClientRect();
+                                            document.documentElement.style.setProperty('--tab-width', `${rect.width}px`);
+                                            document.documentElement.style.setProperty('--tab-height', `${rect.height}px`);
+                                            document.documentElement.style.setProperty('--tab-left', `${el.offsetLeft}px`);
+                                            document.documentElement.style.setProperty('--tab-top', `${el.offsetTop}px`);
+                                        }
+                                    }}
+                                >
+                                    <ImageIcon className="h-4 w-4" />
+                                    <motion.span
+                                        initial={{ opacity: 0.8 }}
+                                        animate={{ opacity: activeTab === "advertisements" ? 1 : 0.8 }}
+                                        transition={{ duration: 0.2 }}
+                                    >
+                                        Advertisements
+                                    </motion.span>
+                                </TabsTrigger>
+
+                                <TabsTrigger
+                                    value="materials"
+                                    className="relative rounded-sm px-2 py-1 text-sm font-medium flex items-center gap-2 z-10 data-[state=active]:bg-transparent"
+                                    ref={(el) => {
+                                        if (el && activeTab === "materials") {
+                                            const rect = el.getBoundingClientRect();
+                                            document.documentElement.style.setProperty('--tab-width', `${rect.width}px`);
+                                            document.documentElement.style.setProperty('--tab-height', `${rect.height}px`);
+                                            document.documentElement.style.setProperty('--tab-left', `${el.offsetLeft}px`);
+                                            document.documentElement.style.setProperty('--tab-top', `${el.offsetTop}px`);
+                                        }
+                                    }}
+                                >
+                                    <File className="h-4 w-4" />
+                                    <motion.span
+                                        initial={{ opacity: 0.8 }}
+                                        animate={{ opacity: activeTab === "materials" ? 1 : 0.8 }}
+                                        transition={{ duration: 0.2 }}
+                                    >
+                                        Materials
+                                    </motion.span>
+                                </TabsTrigger>
+                            </TabsList>
+                        </div>
+
+                        {/* Advertisements Tab */}
+                        <TabsContent value="advertisements" className="mt-0">
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.3 }}
+                            >
+                                <Suspense fallback={<LibraryLoading />}>
+                                    {isLoading && !isDataInitialized ? (
+                                        <LibraryLoading />
+                                    ) : (
+                                        <DataTableLoader
+                                            columns={columns as ColumnDef<unknown, unknown>[]}
+                                            data={records}
+                                            isLoading={isLoading}
+                                            searchPlaceholder="Find content in your library..."
+                                            loadedPages={loadedPages}
+                                            onLoadPage={handleLoadPage}
+                                            serverSidePagination={{
+                                                page,
+                                                pageSize,
+                                                total,
+                                                onPageChange: (newPage: number) => {
+                                                    setPage(newPage);
+                                                    if (cachedRecords[newPage]) {
+                                                        setRecords(cachedRecords[newPage]);
+                                                    }
+                                                },
+                                                onPageSizeChange: setPageSize
+                                            }}
+                                            onRowClick={(record) => {
+                                                // Instead of type assertion, use a type guard to check properties
+                                                const item = record as unknown;
+
+                                                // Check if the record has the expected structure
+                                                if (
+                                                    typeof item === 'object' &&
+                                                    item !== null &&
+                                                    'id' in item &&
+                                                    'type' in item &&
+                                                    typeof item.id === 'string'
+                                                ) {
+                                                    const type = item.type;
+                                                    const id = item.id;
+                                                    let imageUrl = '';
+
+                                                    // Check for image_url property
+                                                    if ('image_url' in item && typeof item.image_url === 'string') {
+                                                        imageUrl = item.image_url;
+                                                    }
+
+                                                    if (type === 'video') {
+                                                        router.push(`/library/video/${id}`);
+                                                    } else {
+                                                        router.push(`/library/${id}?image_url=${encodeURIComponent(imageUrl)}`);
+                                                    }
+                                                }
+                                            }}
+                                            filters={[
+                                                {
+                                                    id: "type",
+                                                    label: "Type",
+                                                    type: "multiselect",
+                                                    options: ["video", "image"],
+                                                    value: selectedType,
+                                                    filterFn: (row, id, value) => {
+                                                        if (!value || (Array.isArray(value) && value.length === 0)) return true;
+                                                        // Get value using getValue without type assertion
+                                                        const type = row.getValue(id);
+                                                        // Check if type is a string and then compare
+                                                        if (typeof type === 'string' && Array.isArray(value)) {
+                                                            return value.includes(type);
+                                                        }
+                                                        return false;
+                                                    },
+                                                    onValueChange: (value) => setSelectedType(value as string[]),
+                                                },
+                                                {
+                                                    id: "sentiment_confidence",
+                                                    label: "Confidence Range",
+                                                    type: "range",
+                                                    value: confidenceRange,
+                                                    filterFn: (row, id, value) => {
+                                                        if (!value) return true;
+                                                        const [min, max] = Array.isArray(value) ? value : [0, 100];
+                                                        // Get confidence value
+                                                        const confidence = row.getValue(id);
+                                                        // Check if confidence is a number before comparing
+                                                        if (typeof confidence === 'number') {
+                                                            return confidence >= min / 100 && confidence <= max / 100;
+                                                        }
+                                                        return false;
+                                                    },
+                                                    onValueChange: (value) => setConfidenceRange(value as [number, number]),
+                                                },
+                                                {
+                                                    id: "sentiment_tone",
+                                                    label: "Tones",
+                                                    type: "multiselect",
+                                                    options: allTones,
+                                                    value: selectedTones,
+                                                    filterFn: (row, id, value) => {
+                                                        if (!value || (Array.isArray(value) && value.length === 0)) return true;
+                                                        // Get tones value
+                                                        const tones = row.getValue(id);
+                                                        // Check if tones is an array of strings
+                                                        if (Array.isArray(tones) && Array.isArray(value)) {
+                                                            return tones.some(tone =>
+                                                                typeof tone === 'string' &&
+                                                                value.includes(tone.toLowerCase())
+                                                            );
+                                                        }
+                                                        return false;
+                                                    },
+                                                    onValueChange: (value) => setSelectedTones(value as string[]),
+                                                },
+                                            ]}
+                                            globalFilter={{
+                                                placeholder: "Search your creative library...",
+                                                searchFn: (row, id, value) => {
+                                                    if (typeof value !== 'string') return true;
+                                                    const searchValue = value.toLowerCase();
+
+                                                    // Get name and description values
+                                                    const nameVal = row.getValue("name");
+                                                    const descVal = row.getValue("image_description");
+
+                                                    // Convert to string safely
+                                                    const name = typeof nameVal === 'string' ? nameVal : String(nameVal || "");
+                                                    const description = typeof descVal === 'string' ? descVal : String(descVal || "");
+
+                                                    return name.toLowerCase().includes(searchValue) ||
+                                                        description.toLowerCase().includes(searchValue);
+                                                },
+                                            }}
+                                            uploadButton={{
+                                                onFileUpload: handleFileUpload,
+                                                onCancelUpload: handleCancelUpload,
+                                                uploadingFiles
+                                            }}
+                                        />
+                                    )}
+                                </Suspense>
+                            </motion.div>
+                        </TabsContent>
+
+                        {/* Materials Tab (Empty for now) */}
+                        <TabsContent value="materials" className="mt-0">
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.3 }}
+                            >
+                                <MaterialsComponent />
+                            </motion.div>
+                        </TabsContent>
+                    </Tabs>
                 </div>
             </div>
         </div>
