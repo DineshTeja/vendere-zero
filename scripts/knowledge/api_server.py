@@ -87,14 +87,17 @@ async def query_endpoint(request: QueryRequest):
     if not kb:
         raise HTTPException(status_code=500, detail="Knowledge base not initialized")
     try:
+        # Call the query method and store the result
         response = await kb.query(
             query=request.query,
             deep_research=request.deep_research,
             detail_level=request.detail_level,
+            attribution_analysis=request.attribution_analysis,
         )
         return response
     except Exception as e:
         logger.error(f"Error in query endpoint: {str(e)}")
+        print_exc()  # Print traceback for easier debugging
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -111,6 +114,7 @@ async def query_stream_endpoint(request: QueryRequest):
     detail_level = request.detail_level
 
     async def event_generator():
+        stream_gen = None
         try:
             # Stream with timeout protection
             start_time = time.time()
@@ -159,6 +163,14 @@ async def query_stream_endpoint(request: QueryRequest):
             # Always send a [DONE] marker at the end to ensure completion
             yield "data: [DONE]\n\n"
             logger.info("Stream completed with [DONE] marker")
+
+            # Properly close the generator to avoid "generator ignored GeneratorExit"
+            if stream_gen:
+                try:
+                    # Explicitly close the generator
+                    stream_gen.close()
+                except Exception as e:
+                    logger.error(f"Error closing generator: {e}")
 
     return StreamingResponse(
         event_generator(),
