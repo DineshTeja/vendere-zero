@@ -14,7 +14,7 @@ interface Message extends BaseMessage {
         title: string;
         description: string;
         task_type: string;
-        input_data: any;
+        input_data: Record<string, unknown>;
         relevance_score: number;
     }>;
     thinking?: string;
@@ -30,7 +30,7 @@ export default function QueryPage() {
     const [input, setInput] = useState('');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [hasError, setHasError] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [detailLevel, setDetailLevel] = useState(50);
     const [deepResearch, setDeepResearch] = useState(false);
 
@@ -42,7 +42,7 @@ export default function QueryPage() {
         }
 
         setIsLoading(true);
-        setHasError(false);
+        setError(null);
 
         try {
             // Add user message
@@ -92,7 +92,7 @@ export default function QueryPage() {
             setMessages(prev => [...prev, assistantMessage]);
         } catch (error) {
             console.error('Error in chat:', error);
-            setHasError(true);
+            setError('Failed to process your request');
             const errorMessage: Message = {
                 id: Date.now().toString(),
                 role: 'assistant',
@@ -124,7 +124,7 @@ export default function QueryPage() {
             setMessages(prev => [...prev, userMessage]);
 
             setIsLoading(true);
-            setHasError(false);
+            setError(null);
 
             // Create a placeholder message for the assistant's response
             const assistantMessageId = (Date.now() + 1).toString();
@@ -175,6 +175,7 @@ export default function QueryPage() {
             let inThinkingBlock = false;
             let thinkingContent = '';
             let regularContent = '';
+            let buffer = ''; // Buffer to handle incomplete JSON
 
             // Read the stream
             while (true) {
@@ -184,8 +185,13 @@ export default function QueryPage() {
                 // Decode the chunk
                 const chunk = decoder.decode(value);
 
-                // Process each line in the chunk (SSE format sends one event per line)
-                const lines = chunk.split('\n');
+                // Add to buffer and process complete lines
+                buffer += chunk;
+                const lines = buffer.split('\n');
+
+                // Keep the last line in the buffer if it's incomplete
+                buffer = lines.pop() || '';
+
                 for (const line of lines) {
                     // Look for lines that start with "data: "
                     if (line.startsWith('data: ')) {
@@ -268,7 +274,7 @@ export default function QueryPage() {
             return message.id;
         } catch (error) {
             console.error('Error in chat:', error);
-            setHasError(true);
+            setError('Failed to process your request');
             const errorMessage: Message = {
                 id: Date.now().toString(),
                 role: 'assistant',
