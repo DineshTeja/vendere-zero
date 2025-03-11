@@ -44,6 +44,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
+
+    // Use window.location for a full page reload instead of client-side navigation
+    // This ensures the server rehydrates with the latest session data
+    window.location.href = '/market'
   }
 
   const signUp = async (email: string, password: string) => {
@@ -54,6 +58,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
+
+    // Use window.location for a full page reload to the login page
+    window.location.href = '/auth/login'
   }
 
   return (

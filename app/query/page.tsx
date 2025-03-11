@@ -197,8 +197,157 @@ export default function QueryPage() {
                         }
 
                         try {
-                            // Parse the JSON content
-                            const jsonData = JSON.parse(content);
+                            // Parse the JSON content safely
+                            let jsonData;
+                            try {
+                                jsonData = JSON.parse(content);
+                            } catch (parseErrorUnknown) {
+                                // Convert unknown error to Error type
+                                const parseError = parseErrorUnknown as Error;
+                                console.error('Error parsing SSE data:', parseError);
+                                console.log('Content that failed to parse:', content);
+
+                                // Try to salvage what we can by removing problematic parts
+                                let sanitizedContent = content;
+
+                                if (typeof content === 'string') {
+                                    try {
+                                        // Add safety: if content is extremely long, use a simpler approach
+                                        if (content.length > 10000) {
+                                            // For very long content, just extract what we can with a regex
+                                            const responseMatch = content.match(/"response"\s*:\s*"([^"\\]*(\\.[^"\\]*)*)"/);
+                                            if (responseMatch && responseMatch[1]) {
+                                                jsonData = { response: responseMatch[1] };
+                                                console.log('Extracted response field from large content');
+                                                throw new Error('Skip to response extraction');
+                                            }
+                                        }
+
+                                        // For unterminated strings (most common issue):
+                                        // 1. If content ends without a closing quote, add it
+                                        if (sanitizedContent.match(/["']:?\s*$/)) {
+                                            sanitizedContent += '""';
+                                        }
+
+                                        // 2. Look for unescaped quotes inside strings (more comprehensive)
+                                        // This regex is more careful about finding actual unescaped quotes
+                                        sanitizedContent = sanitizedContent.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, (match) => {
+                                            // Replace any unescaped quotes inside the string
+                                            return match.replace(/([^\\])"/g, '$1\\"');
+                                        });
+
+                                        // 3. Handle newlines inside strings (more comprehensive)
+                                        sanitizedContent = sanitizedContent.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, (match) => {
+                                            // Replace any unescaped newlines inside the string
+                                            return match.replace(/\n/g, '\\n');
+                                        });
+
+                                        // 4. Find unterminated object/array issues
+                                        const openBraces = (sanitizedContent.match(/\{/g) || []).length;
+                                        const closeBraces = (sanitizedContent.match(/\}/g) || []).length;
+                                        if (openBraces > closeBraces) {
+                                            sanitizedContent += '}'.repeat(openBraces - closeBraces);
+                                        }
+
+                                        const openBrackets = (sanitizedContent.match(/\[/g) || []).length;
+                                        const closeBrackets = (sanitizedContent.match(/\]/g) || []).length;
+                                        if (openBrackets > closeBrackets) {
+                                            sanitizedContent += ']'.repeat(openBrackets - closeBrackets);
+                                        }
+
+                                        // 5. Extreme case: if at position X there's an error, truncate and close
+                                        if (parseError.message && parseError.message.includes('at position')) {
+                                            const match = parseError.message.match(/at position (\d+)/);
+                                            if (match && match[1]) {
+                                                const errorPos = parseInt(match[1]);
+                                                if (errorPos > 0 && errorPos < sanitizedContent.length) {
+                                                    // Truncate at error position and ensure it's valid JSON
+                                                    const truncated = sanitizedContent.substring(0, errorPos - 5); // Go back a bit to be safe
+
+                                                    // Attempt to find the last complete property
+                                                    const lastPropertyMatch = truncated.match(/.*"([^"]+)"\s*:/);
+                                                    let fixedJson = truncated;
+
+                                                    if (lastPropertyMatch) {
+                                                        // Close the string and object properly
+                                                        fixedJson = truncated + '""';
+                                                    }
+
+                                                    // Add closing brackets/braces as needed
+                                                    const openBraces = (fixedJson.match(/\{/g) || []).length;
+                                                    const closeBraces = (fixedJson.match(/\}/g) || []).length;
+                                                    const openBrackets = (fixedJson.match(/\[/g) || []).length;
+                                                    const closeBrackets = (fixedJson.match(/\]/g) || []).length;
+
+                                                    let closingString = '';
+                                                    if (openBraces > closeBraces) {
+                                                        closingString += '}'.repeat(openBraces - closeBraces);
+                                                    }
+                                                    if (openBrackets > closeBrackets) {
+                                                        closingString += ']'.repeat(openBrackets - closeBrackets);
+                                                    }
+
+                                                    sanitizedContent = fixedJson + closingString;
+                                                }
+                                            }
+                                        }
+
+                                        // Try parsing again with the sanitized content
+                                        try {
+                                            jsonData = JSON.parse(sanitizedContent);
+                                            console.log('Recovered from malformed JSON');
+                                        } catch (secondError) {
+                                            // Most aggressive approach: extract just the response field with regex
+                                            const responseMatch = content.match(/"response"\s*:\s*"([^"\\]*(\\.[^"\\]*)*)"/);
+                                            if (responseMatch && responseMatch[1]) {
+                                                jsonData = { response: responseMatch[1].replace(/\\"/g, '"') };
+                                                console.log('Extracted response field from malformed JSON');
+                                            } else {
+                                                // Even more aggressive: try to find any text content
+                                                const textMatch = content.match(/"([^"\\]*(\\.[^"\\]*)*)":/);
+                                                if (textMatch && textMatch[1] && textMatch[1].length > 20) {
+                                                    jsonData = { response: textMatch[1] };
+                                                    console.log('Extracted some text content as response');
+                                                } else {
+                                                    throw parseError; // Original error
+                                                }
+                                            }
+                                        }
+                                    } catch (recoveryError) {
+                                        // Last resort: create a minimal valid JSON object with an error message
+                                        jsonData = {
+                                            response: "[Error: Could not parse server response]",
+                                            error: parseError.message || "Unknown parsing error"
+                                        };
+                                    }
+                                } else {
+                                    // Non-string content, create error object
+                                    jsonData = {
+                                        response: "[Error: Invalid response format]",
+                                        error: parseError.message || "Unknown parsing error"
+                                    };
+                                }
+                            }
+
+                            // Check for error messages in the response
+                            if (jsonData.error) {
+                                console.error('Server reported error:', jsonData.error);
+
+                                // Update the message to show the error
+                                setMessages(prevMessages =>
+                                    prevMessages.map(msg => {
+                                        if (msg.id === assistantMessageId) {
+                                            return {
+                                                ...msg,
+                                                content: (msg.content || '') +
+                                                    "\n\n[Error: " + jsonData.error + "]"
+                                            };
+                                        }
+                                        return msg;
+                                    })
+                                );
+                                continue;
+                            }
 
                             // Process the response text to extract thinking sections
                             const responseText = jsonData.response || '';
@@ -259,7 +408,23 @@ export default function QueryPage() {
                                 })
                             );
                         } catch (error) {
-                            console.error('Error parsing SSE data:', error, content);
+                            console.error('Error parsing SSE data:', error);
+                            console.log('Content that failed to parse:', content);
+
+                            // Continue processing - don't break the stream
+                            // But notify the user of the issue in the UI
+                            setMessages(prevMessages =>
+                                prevMessages.map(msg => {
+                                    if (msg.id === assistantMessageId && msg.content) {
+                                        return {
+                                            ...msg,
+                                            content: msg.content +
+                                                "\n\n[Error processing part of the response. Full response may be incomplete]"
+                                        };
+                                    }
+                                    return msg;
+                                })
+                            );
                         }
                     }
                 }
