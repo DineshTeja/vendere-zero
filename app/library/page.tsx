@@ -624,7 +624,6 @@ export default function Library() {
                     >
                         <div className="flex items-center justify-between mb-6 pt-2">
                             <div className="text-lg font-light tracking-wide text-muted-foreground">
-                                Creative Library
                             </div>
 
                             <TabsList className="bg-transparent space-x-2 relative">
@@ -663,7 +662,7 @@ export default function Library() {
                                         animate={{ opacity: activeTab === "advertisements" ? 1 : 0.8 }}
                                         transition={{ duration: 0.2 }}
                                     >
-                                        Advertisements
+                                        Labeled Advertisements
                                     </motion.span>
                                 </TabsTrigger>
 

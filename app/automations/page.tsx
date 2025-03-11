@@ -662,7 +662,7 @@ export default function Automations() {
     {
       id: "auto-1",
       prompt: "Generate variants of our Instagram display ads for athleisure",
-      status: "in_progress",
+      status: "active",
       created_at: "2024-03-11T14:30:00Z",
       results: 17,
       type: "variant_generation",
@@ -673,7 +673,7 @@ export default function Automations() {
     {
       id: "auto-2",
       prompt: "Personalize homepage hero section based on user behavior",
-      status: "active",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 3,
       type: "website_personalization",
@@ -684,7 +684,7 @@ export default function Automations() {
     {
       id: "auto-3",
       prompt: "Cart abandonment email sequence optimization",
-      status: "scheduled",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 5,
       type: "email_followup",
@@ -695,7 +695,7 @@ export default function Automations() {
     {
       id: "auto-4",
       prompt: "Generate Facebook ad creative for holiday sale",
-      status: "active",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 15,
       type: "variant_generation",
@@ -706,7 +706,7 @@ export default function Automations() {
     {
       id: "auto-5",
       prompt: "Product recommendation personalization for returning customers",
-      status: "active",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 7,
       type: "website_personalization",
@@ -717,7 +717,7 @@ export default function Automations() {
     {
       id: "auto-6",
       prompt: "Post-purchase follow-up email sequence",
-      status: "scheduled",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 4,
       type: "email_followup",
@@ -728,7 +728,7 @@ export default function Automations() {
     {
       id: "auto-7",
       prompt: "Landing page content personalization by traffic source",
-      status: "active",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 4,
       type: "website_personalization",
@@ -739,7 +739,7 @@ export default function Automations() {
     {
       id: "auto-8",
       prompt: "Generate Google Ads headline combinations for B2B software",
-      status: "active",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 18,
       type: "variant_generation",
@@ -750,7 +750,7 @@ export default function Automations() {
     {
       id: "auto-9",
       prompt: "Browse abandonment email recovery sequence",
-      status: "failed",
+      status: "not_active",
       created_at: "2024-03-11T09:15:00Z",
       results: 0,
       type: "email_followup",
@@ -914,16 +914,16 @@ export default function Automations() {
                     {automations.map((automation) => (
                       <motion.div
                         key={automation.id}
-                        className="border bg-muted/50 p-4 hover:bg-muted/60 transition-colors cursor-pointer"
+                        className={`border bg-muted/50 p-4 hover:bg-muted/60 transition-colors cursor-pointer ${automation.status === "not_active" ? "opacity-60 hover:opacity-90" : ""}`}
                         whileHover={{ y: -1 }}
                         initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
+                        animate={{ opacity: automation.status === "not_active" ? 0.6 : 1 }}
                         transition={{ duration: 0.2 }}
                       >
                         <div className="flex items-center justify-between" onClick={() => handleAutomationClick(automation.id)}>
                           <div className="flex items-center gap-3">
                             <div>
-                              <div className="text-sm font-medium">{automation.prompt}</div>
+                              <div className={`text-sm font-medium ${automation.status === "not_active" ? "text-muted-foreground/80" : ""}`}>{automation.prompt}</div>
                               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                                 <div className="flex items-center gap-1">
                                   <Clock className="h-3 w-3" />
@@ -969,13 +969,13 @@ export default function Automations() {
                                                         : "";
 
                                       return (
-                                        <span key={index} className="px-2 py-1 bg-muted text-xs rounded-sm flex items-center gap-1.5">
+                                        <span key={index} className={`px-2 py-1 bg-muted text-xs rounded-sm flex items-center gap-1.5 ${automation.status === "not_active" ? "bg-muted/40" : ""}`}>
                                           {sourceUrl && (
                                             <div className="w-4 h-4 rounded-sm overflow-hidden bg-muted flex items-center justify-center">
                                               <img
                                                 src={`https://www.google.com/s2/favicons?domain=${sourceUrl}&sz=32`}
                                                 alt={source}
-                                                className="w-full h-full object-contain"
+                                                className={`w-full h-full object-contain ${automation.status === "not_active" ? "opacity-80" : ""}`}
                                                 onError={(e) => {
                                                   const target = e.target as HTMLImageElement;
                                                   target.style.display = 'none';
@@ -1008,13 +1008,13 @@ export default function Automations() {
                                                   : "";
 
                                       return (
-                                        <span key={index} className="px-2 py-1 bg-muted text-xs rounded-sm flex items-center gap-1.5">
+                                        <span key={index} className={`px-2 py-1 bg-muted text-xs rounded-sm flex items-center gap-1.5 ${automation.status === "not_active" ? "bg-muted/40" : ""}`}>
                                           {channelUrl && (
                                             <div className="w-4 h-4 rounded-sm overflow-hidden bg-muted flex items-center justify-center">
                                               <img
                                                 src={`https://www.google.com/s2/favicons?domain=${channelUrl}&sz=32`}
                                                 alt={channel}
-                                                className="w-full h-full object-contain"
+                                                className={`w-full h-full object-contain ${automation.status === "not_active" ? "opacity-80" : ""}`}
                                                 onError={(e) => {
                                                   const target = e.target as HTMLImageElement;
                                                   target.style.display = 'none';
@@ -1044,15 +1044,18 @@ export default function Automations() {
                                 ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
                                 : automation.status === "scheduled"
                                   ? "bg-orange-500/10 text-orange-700 dark:text-orange-400"
-                                  : "bg-red-500/10 text-red-700 dark:text-red-400"
+                                  : "bg-gray-500/10 text-gray-600 dark:text-gray-400"
                               }`}>
-                              {automation.status}
+                              {automation.status === "not_active" ? "Not Active" : automation.status}
                             </span>
                             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-sm">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
+                        {automation.status === "not_active" && (
+                          <div className="absolute inset-0 bg-background/5 pointer-events-none"></div>
+                        )}
                       </motion.div>
                     ))}
                   </div>

@@ -17,6 +17,7 @@ import {
     Scroll,
     ChevronLeft,
     ChevronRight,
+    PuzzleIcon
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -110,6 +111,13 @@ const formatUrl = (url: string) => {
     }
 };
 
+// Add type for connected tools
+type ConnectedTool = {
+    name: string;
+    domain: string;
+    status: "connected" | "disconnected";
+};
+
 export default function MaterialsComponent() {
     const [searchQuery, setSearchQuery] = useState("");
     const [isAddFromUrlOpen, setIsAddFromUrlOpen] = useState(false);
@@ -120,6 +128,21 @@ export default function MaterialsComponent() {
     const [materialToDelete, setMaterialToDelete] = useState<MaterialItem | null>(null);
     const [selectedMaterial, setSelectedMaterial] = useState<MaterialItem | null>(null);
     const [currentCrawlPage, setCurrentCrawlPage] = useState(0);
+
+    // Add connected tools list
+    const [connectedTools] = useState<ConnectedTool[]>([
+        { name: "Hubspot", domain: "hubspot.com", status: "connected" },
+        { name: "Salesforce", domain: "salesforce.com", status: "connected" },
+        { name: "Google Ads", domain: "ads.google.com", status: "connected" },
+        { name: "Meta Ads", domain: "facebook.com", status: "connected" },
+        { name: "Hootsuite", domain: "hootsuite.com", status: "connected" },
+        { name: "Optimizely", domain: "optimizely.com", status: "connected" }
+    ]);
+
+    // Add function to get favicon for tools
+    const getFaviconUrl = (domain: string): string => {
+        return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+    };
 
     // Fetch initial materials and set up real-time subscription
     useEffect(() => {
@@ -413,8 +436,8 @@ export default function MaterialsComponent() {
                                             <FaGoogle className="h-4 w-4 mr-2" />
                                             Add from Google Analytics
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem className="flex items-center">    
-                                            <FaSalesforce className="h-4 w-4 mr-2"/>
+                                        <DropdownMenuItem className="flex items-center">
+                                            <FaSalesforce className="h-4 w-4 mr-2" />
                                             Add from Salesforce
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
@@ -430,6 +453,36 @@ export default function MaterialsComponent() {
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                     />
+                                </div>
+                            </div>
+
+                            {/* Connected Tools Section */}
+                            <div className="border-b py-3 px-4 bg-muted/20">
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <PuzzleIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                                        <span className="text-xs font-medium text-muted-foreground">Connected Tools</span>
+                                    </div>
+                                    <span className="text-xs text-[#4EBE96]">{connectedTools.length} active</span>
+                                </div>
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    {connectedTools.map((tool) => (
+                                        <div
+                                            key={tool.name}
+                                            className="flex items-center gap-1.5 bg-muted/60 hover:bg-muted px-2 py-1 rounded-sm group cursor-pointer transition-colors"
+                                            title={`${tool.name} (${tool.status})`}
+                                        >
+                                            <div className="relative w-4 h-4 flex-shrink-0">
+                                                <img
+                                                    src={getFaviconUrl(tool.domain)}
+                                                    alt={tool.name}
+                                                    className="w-full h-full object-contain"
+                                                />
+                                                <div className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 bg-[#4EBE96] rounded-full" />
+                                            </div>
+                                            <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">{tool.name}</span>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 

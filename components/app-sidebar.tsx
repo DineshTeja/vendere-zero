@@ -57,7 +57,7 @@ const getNavData = () => ({
       icon: BarChart3Icon,
     },
     {
-      title: "Library",
+      title: "Library & Data",
       url: "/library",
       icon: LibraryBigIcon,
     },
