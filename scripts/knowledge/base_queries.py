@@ -898,7 +898,7 @@ Impressions: {metric["total_impressions"] if metric["total_impressions"] is not 
 Conversions: {metric["total_conversions"] if metric["total_conversions"] is not None else "N/A"}
 Total Cost: {metric["total_cost"] if metric["total_cost"] is not None else "N/A"}
 Ad Description: {metric["ad_description"] if metric["ad_description"] is not None else "N/A"}"""
-                
+
                 doc = Document(
                     text=metric_text,
                     extra_info={
