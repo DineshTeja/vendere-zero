@@ -3,7 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { GeistSans } from "geist/font/sans";
+// import { GeistSans } from "geist/font/sans";
 import { Header } from "@/components/header";
 import { Providers } from "@/components/providers";
 import { ConditionalSearch } from "@/components/conditional-search";
@@ -57,10 +57,10 @@ export default async function RootLayout({
           <AuthProvider>
             <SidebarProvider defaultOpen={sidebarState}>
               <div className="flex h-screen w-[100%]">
-                <AppSidebar />
+                {session && <AppSidebar />}
                 <div className="flex flex-col flex-1 overflow-hidden w-[100%]">
                   <div className="h-16 shrink-0">
-                    <Header />
+                    {session && <Header />}
                   </div>
                   <main className="flex-1 overflow-auto w-[100%] font-sans antialiased">
                     {children}
