@@ -13,20 +13,19 @@ import os
 import asyncio
 import time
 from pydantic import BaseModel
+
 from hf_models import (
     get_text_from_image_url,
     load_florence_model,
     TextRegion,
 )
-
-# Change relative imports to absolute imports
-from scripts.knowledge.base_queries import KnowledgeBase, QueryRequest
-from scripts.knowledge.market_view import (
+from base_queries import KnowledgeBase, QueryRequest
+from market_view import (
     MarketResearchAnalyzer,
     MarketInsightRequest,
     MarketInsightResponse,
 )
-from scripts.knowledge.variants import VariantGenerator, VariantInput, GeneratedVariant
+from variants import VariantGenerator, VariantInput, GeneratedVariant
 
 # # Import KeywordVariantGenerator and related models
 # from scripts.knowledge.keyword_variants import (
