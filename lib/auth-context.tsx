@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Use window.location for a full page reload instead of client-side navigation
     // This ensures the server rehydrates with the latest session data
-    window.location.href = '/market'
+    window.location.href = '/library'
   }
 
   const signUp = async (email: string, password: string) => {

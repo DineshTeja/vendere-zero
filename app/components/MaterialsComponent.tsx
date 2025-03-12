@@ -52,6 +52,12 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FaGoogle, FaHubspot, FaSalesforce } from "react-icons/fa6";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -74,15 +80,23 @@ type ContentRule = {
     value: ContentRuleValue;
 };
 
+// Add type for keyword queries
+type KeywordQuery = {
+    keyword: string;
+    intent: string;
+    likelihood: number;
+    citations: string[];
+};
+
 type MaterialItem = {
     id: string;
     user_id: string;
     material_url: string;
-    content_type: "pdf" | "docx" | "url" | "gdrive" | "notion";
+    content_type: "pdf" | "docx" | "url" | "gdrive" | "notion" | "semrush";
     summary: string;
     analysis: string;
     content_rules: ContentRule[];
-    material_type: "strategy" | "branding" | "guidelines";
+    material_type: "strategy" | "branding" | "guidelines" | "queries";
     tags: string[];
     image_urls: string[];
     crawled_urls: Array<{
@@ -91,6 +105,7 @@ type MaterialItem = {
     }>;
     created_at: string;
     updated_at: string;
+    keyword_queries?: Record<string, KeywordQuery[]>;
 };
 
 type URLMetadata = {
@@ -128,6 +143,7 @@ export default function MaterialsComponent() {
     const [materialToDelete, setMaterialToDelete] = useState<MaterialItem | null>(null);
     const [selectedMaterial, setSelectedMaterial] = useState<MaterialItem | null>(null);
     const [currentCrawlPage, setCurrentCrawlPage] = useState(0);
+    const [queriesData, setQueriesData] = useState<Record<string, KeywordQuery[]> | null>(null);
 
     // Add connected tools list
     const [connectedTools] = useState<ConnectedTool[]>([
@@ -142,6 +158,26 @@ export default function MaterialsComponent() {
     // Add function to get favicon for tools
     const getFaviconUrl = (domain: string): string => {
         return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+    };
+
+    // Helper function to extract domain from URL
+    const extractDomain = (url: string): string => {
+        try {
+            const domain = new URL(url).hostname.replace('www.', '');
+            return domain.split('.')[0]; // Return just the domain name without TLD
+        } catch {
+            return url; // Return the original string if it's not a valid URL
+        }
+    };
+
+    // Add this function for customer queries visualization
+    const getFaviconForSource = (url: string): string => {
+        try {
+            const domain = new URL(url).origin;
+            return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+        } catch {
+            return '';
+        }
     };
 
     // Fetch initial materials and set up real-time subscription
@@ -160,8 +196,55 @@ export default function MaterialsComponent() {
                     return;
                 }
 
-                const materialsData = data as MaterialItem[];
+                // Add the semrush customer queries special material
+                const mockQueriesData: Record<string, KeywordQuery[]> = {
+                    "purchase intent": [
+                        { keyword: "buy marketing automation tool", intent: "purchase intent", likelihood: 0.85, citations: ["https://semrush.com", "https://ahrefs.com"] },
+                        { keyword: "best email marketing software", intent: "purchase intent", likelihood: 0.78, citations: ["https://moz.com", "https://semrush.com"] },
+                        { keyword: "compare marketing automation platforms", intent: "purchase intent", likelihood: 0.92, citations: ["https://g2.com", "https://capterra.com"] },
+                        { keyword: "marketing software pricing", intent: "purchase intent", likelihood: 0.64, citations: ["https://hubspot.com", "https://mailchimp.com"] }
+                    ],
+                    "information seeking": [
+                        { keyword: "what is marketing automation", intent: "information seeking", likelihood: 0.95, citations: ["https://wikipedia.org", "https://hubspot.com"] },
+                        { keyword: "benefits of email marketing", intent: "information seeking", likelihood: 0.88, citations: ["https://mailchimp.com", "https://constantcontact.com"] },
+                        { keyword: "how to create marketing campaign", intent: "information seeking", likelihood: 0.76, citations: ["https://blog.hubspot.com", "https://neilpatel.com"] },
+                        { keyword: "marketing automation examples", intent: "information seeking", likelihood: 0.82, citations: ["https://marketo.com", "https://pardot.com"] }
+                    ],
+                    "problem solving": [
+                        { keyword: "how to improve email open rates", intent: "problem solving", likelihood: 0.71, citations: ["https://mailchimp.com", "https://campaign-monitor.com"] },
+                        { keyword: "fix low conversion rates", intent: "problem solving", likelihood: 0.65, citations: ["https://optimizely.com", "https://unbounce.com"] },
+                        { keyword: "email deliverability issues", intent: "problem solving", likelihood: 0.79, citations: ["https://sendgrid.com", "https://mailgun.com"] }
+                    ],
+                    "research": [
+                        { keyword: "marketing automation industry trends", intent: "research", likelihood: 0.87, citations: ["https://forrester.com", "https://gartner.com"] },
+                        { keyword: "email marketing statistics 2023", intent: "research", likelihood: 0.91, citations: ["https://statista.com", "https://emailmonday.com"] },
+                        { keyword: "marketing technology landscape", intent: "research", likelihood: 0.83, citations: ["https://chiefmartec.com", "https://martechalliance.com"] }
+                    ]
+                };
+
+                // Create special material for Semrush customer queries
+                const semrushMaterial: MaterialItem = {
+                    id: "semrush-customer-queries",
+                    user_id: "system",
+                    material_url: "https://semrush.com/customer-queries",
+                    content_type: "semrush",
+                    summary: "Customer queries and search intent data from Semrush",
+                    analysis: "This data represents customer queries grouped by intent, showing what potential customers are searching for online. Use this information to inform your content strategy and product positioning.",
+                    content_rules: [],
+                    material_type: "queries",
+                    tags: ["semrush", "keywords", "queries", "search intent"],
+                    image_urls: [],
+                    crawled_urls: [],
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    keyword_queries: mockQueriesData
+                };
+
+                // Add Semrush material to the beginning of the list
+                const materialsData = [semrushMaterial, ...(data as MaterialItem[])];
                 setMaterials(materialsData);
+                setQueriesData(mockQueriesData);
+
                 // Auto-select the first material if available
                 if (materialsData.length > 0) {
                     setSelectedMaterial(materialsData[0]);
@@ -391,15 +474,15 @@ export default function MaterialsComponent() {
                         <div className="w-[320px] h-full flex flex-col overflow-hidden box-border border-r">
                             <div className="px-4 py-3 flex items-center justify-between border-b">
                                 <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium">Materials</span>
-                                    <div className="bg-[#4EBE96]/20 px-1.5 py-0.5 text-xs">
+                                    <span className="text-sm font-medium">Sources</span>
+                                    {/* <div className="bg-[#4EBE96]/20 px-1.5 py-0.5 text-xs">
                                         {materials.length}
-                                    </div>
+                                    </div> */}
                                 </div>
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="sm">
-                                            <Plus className="h-3 w-3" /> Connect a Source
+                                        <Button variant="ghost" size="sm" className="text-muted-foreground rounded-none">
+                                            <Plus className="h-3 w-3" /> Connect New
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-56">
@@ -506,15 +589,25 @@ export default function MaterialsComponent() {
                                             >
                                                 <div className="flex-1 min-w-0 space-y-1">
                                                     <h3 className="text-sm font-medium truncate leading-none">
-                                                        {formatUrl(material.material_url)}
+                                                        {material.content_type === "semrush"
+                                                            ? "Semrush/Customer-Queries"
+                                                            : formatUrl(material.material_url)}
                                                     </h3>
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="inline-flex px-2 py-0.5 bg-[#4EBE96]/20 text-xs whitespace-nowrap">
                                                             {material.material_type}
                                                         </span>
-                                                        <span className="inline-flex text-xs text-muted-foreground whitespace-nowrap">
-                                                            {material.crawled_urls.length} pages
-                                                        </span>
+                                                        {material.content_type === "semrush" ? (
+                                                            <span className="inline-flex text-xs text-muted-foreground whitespace-nowrap">
+                                                                {Object.values(material.keyword_queries || {}).reduce(
+                                                                    (total, queries) => total + queries.length, 0
+                                                                )} queries
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex text-xs text-muted-foreground whitespace-nowrap">
+                                                                {material.crawled_urls.length} pages
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <Button
@@ -523,7 +616,14 @@ export default function MaterialsComponent() {
                                                     className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        setMaterialToDelete(material);
+                                                        if (material.content_type !== "semrush") {
+                                                            setMaterialToDelete(material);
+                                                        } else {
+                                                            toast({
+                                                                title: "System Material",
+                                                                description: "This is a system material and cannot be deleted.",
+                                                            });
+                                                        }
                                                     }}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
@@ -544,7 +644,9 @@ export default function MaterialsComponent() {
                                         <div className="flex items-center justify-between">
                                             <div>
                                                 <h3 className="text-sm font-medium truncate">
-                                                    {formatUrl(selectedMaterial.material_url)}
+                                                    {selectedMaterial.content_type === "semrush"
+                                                        ? "Semrush Customer Queries Analysis"
+                                                        : formatUrl(selectedMaterial.material_url)}
                                                 </h3>
                                                 <p className="text-xs text-muted-foreground mt-1">
                                                     Added {new Date(selectedMaterial.created_at).toLocaleDateString()}
@@ -586,143 +688,261 @@ export default function MaterialsComponent() {
                                         </div>
                                     </div>
 
-                                    {/* Content Rules */}
-                                    <div className="border bg-muted/50 p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
-                                                Content Rules
-                                            </span>
-                                        </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                            {selectedMaterial.content_rules.length === 0 ? (
-                                                <div className="p-4 bg-muted/50 border">
-                                                    <p className="text-sm text-muted-foreground">
-                                                        No content rules defined
-                                                    </p>
+                                    {/* Special rendering for customer queries */}
+                                    {selectedMaterial.content_type === "semrush" && selectedMaterial.keyword_queries ? (
+                                        <div className="border bg-muted/50 p-4">
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
+                                                    Customer Queries by Intent
+                                                </span>
+                                            </div>
+                                            <div className="relative overflow-y-auto max-h-[500px] no-scrollbar">
+                                                {/* Scroll hint indicator */}
+                                                <div className="absolute right-0 top-1/2 transform -translate-y-1/2 bg-gradient-to-l from-background to-transparent w-12 h-full z-10 pointer-events-none flex items-center justify-end pr-2">
+                                                    <div className="h-8 w-8 rounded-full bg-muted/80 flex items-center justify-center">
+                                                        <ChevronRight className="h-4 w-4 text-muted-foreground animate-pulse" />
+                                                    </div>
                                                 </div>
-                                            ) : (
-                                                selectedMaterial.content_rules.map((rule, index) => (
-                                                    <div key={index} className="p-4 bg-muted/50 border">
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center justify-between">
-                                                                <h4 className="text-sm font-medium">{rule.name}</h4>
-                                                                <span className="px-2 py-1 bg-[#4EBE96]/20 text-xs">
-                                                                    {rule.type}
-                                                                </span>
-                                                            </div>
-                                                            <div>
-                                                                <p className="text-sm text-muted-foreground">
-                                                                    {rule.description}
-                                                                </p>
-                                                            </div>
-                                                            <div>
-                                                                <span className="text-xs font-medium">Value</span>
-                                                                {Array.isArray(rule.value) ? (
-                                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                                        {rule.value.map((item, i) => (
-                                                                            <span
-                                                                                key={i}
-                                                                                className="px-2 py-0.5 bg-muted text-xs"
-                                                                            >
-                                                                                {item}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="mt-1 text-sm">
-                                                                        {typeof rule.value === "object" ? (
-                                                                            <pre className="p-2 bg-muted font-mono text-xs overflow-x-auto">
-                                                                                {JSON.stringify(rule.value, null, 2)}
-                                                                            </pre>
-                                                                        ) : (
-                                                                            <span className="px-2 py-0.5 bg-muted text-xs">
-                                                                                {String(rule.value)}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                )}
+
+                                                <div className="flex overflow-x-auto pb-6 pt-2 space-x-6 snap-x no-scrollbar">
+                                                    {Object.entries(selectedMaterial.keyword_queries).map(([intent, keywords]) => (
+                                                        <div key={intent} className="min-w-[300px] max-w-[350px] flex-shrink-0 snap-start border-t-2 border-muted pt-2">
+                                                            <h3 className="text-sm font-medium capitalize mb-3 sticky top-0 bg-background py-1">{intent}</h3>
+                                                            <div className="space-y-3">
+                                                                {keywords
+                                                                    .sort((a, b) => b.likelihood - a.likelihood)
+                                                                    .map((keyword, index) => (
+                                                                        <div
+                                                                            key={index}
+                                                                            className="flex items-center justify-between p-3 border bg-muted/50 relative"
+                                                                        >
+                                                                            <span className="text-sm truncate">{keyword.keyword}</span>
+                                                                            <div className="flex items-center gap-2">
+                                                                                {/* Citations display */}
+                                                                                {keyword.citations && keyword.citations.length > 0 && (
+                                                                                    <TooltipProvider>
+                                                                                        <Tooltip>
+                                                                                            <TooltipTrigger asChild>
+                                                                                                <div className="flex items-center cursor-pointer">
+                                                                                                    {/* Display up to 2 favicons in a layered style */}
+                                                                                                    <div className="flex relative">
+                                                                                                        {keyword.citations.slice(0, 2).map((citation, i) => (
+                                                                                                            <div
+                                                                                                                key={i}
+                                                                                                                className="w-4 h-4 rounded-full border border-background overflow-hidden bg-white"
+                                                                                                                style={{
+                                                                                                                    marginLeft: i > 0 ? '-6px' : '0',
+                                                                                                                    zIndex: 2 - i,
+                                                                                                                    position: 'relative'
+                                                                                                                }}
+                                                                                                            >
+                                                                                                                <img
+                                                                                                                    src={getFaviconForSource(citation)}
+                                                                                                                    alt={extractDomain(citation)}
+                                                                                                                    className="w-full h-full object-contain"
+                                                                                                                    onError={(e) => {
+                                                                                                                        const target = e.target as HTMLImageElement;
+                                                                                                                        target.style.display = 'none';
+                                                                                                                        target.parentElement!.innerHTML = extractDomain(citation).charAt(0).toUpperCase();
+                                                                                                                        target.parentElement!.style.display = 'flex';
+                                                                                                                        target.parentElement!.style.alignItems = 'center';
+                                                                                                                        target.parentElement!.style.justifyContent = 'center';
+                                                                                                                        target.parentElement!.style.backgroundColor = '#f0f0f0';
+                                                                                                                        target.parentElement!.style.color = '#333';
+                                                                                                                    }}
+                                                                                                                />
+                                                                                                            </div>
+                                                                                                        ))}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </TooltipTrigger>
+                                                                                            <TooltipContent>
+                                                                                                <div className="space-y-1 max-w-xs">
+                                                                                                    <p className="text-xs font-medium">Sources:</p>
+                                                                                                    <ul className="text-xs">
+                                                                                                        {keyword.citations.slice(0, 3).map((citation, i) => (
+                                                                                                            <li key={i} className="flex items-center gap-1">
+                                                                                                                <div className="w-3 h-3 rounded-full overflow-hidden bg-white">
+                                                                                                                    <img
+                                                                                                                        src={getFaviconForSource(citation)}
+                                                                                                                        alt=""
+                                                                                                                        className="w-full h-full object-contain"
+                                                                                                                    />
+                                                                                                                </div>
+                                                                                                                <span>{extractDomain(citation)}</span>
+                                                                                                            </li>
+                                                                                                        ))}
+                                                                                                        {keyword.citations.length > 3 && (
+                                                                                                            <li className="text-xs text-muted-foreground">
+                                                                                                                +{keyword.citations.length - 3} more
+                                                                                                            </li>
+                                                                                                        )}
+                                                                                                    </ul>
+                                                                                                </div>
+                                                                                            </TooltipContent>
+                                                                                        </Tooltip>
+                                                                                    </TooltipProvider>
+                                                                                )}
+                                                                                <span
+                                                                                    className={`text-xs px-2 py-1 ${keyword.likelihood >= 0.7
+                                                                                        ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                                                                                        : keyword.likelihood >= 0.4
+                                                                                            ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
+                                                                                            : 'bg-red-500/10 text-red-700 dark:text-red-400'
+                                                                                        }`}
+                                                                                >
+                                                                                    {(keyword.likelihood * 100).toFixed(0)}%
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Analysis */}
-                                    <div className="border bg-muted/50 p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
-                                                Analysis
-                                            </span>
-                                        </div>
-                                        <div className="markdown">
-                                            <ReactMarkdown
-                                                remarkPlugins={[remarkGfm]}
-                                                className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-semibold prose-p:text-sm prose-li:text-sm prose-code:text-sm prose-pre:bg-muted prose-pre:p-4 prose-a:text-primary hover:prose-a:underline"
-                                                components={{
-                                                    img: () => null,
-                                                }}
-                                            >
-                                                {selectedMaterial.analysis}
-                                            </ReactMarkdown>
-                                        </div>
-                                    </div>
-
-                                    {/* Crawled URLs */}
-                                    <div className="border bg-muted/50 p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
-                                                Crawled Pages</span>
-                                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                                <span>
-                                                    {currentCrawlPage + 1} of {selectedMaterial.crawled_urls.length}
-                                                </span>
-                                                <div className="flex items-center gap-1 ml-2">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 rounded-none"
-                                                        disabled={currentCrawlPage === 0}
-                                                        onClick={() => setCurrentCrawlPage((prev) => prev - 1)}
-                                                    >
-                                                        <ChevronLeft className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 rounded-none"
-                                                        disabled={currentCrawlPage === selectedMaterial.crawled_urls.length - 1}
-                                                        onClick={() => setCurrentCrawlPage((prev) => prev + 1)}
-                                                    >
-                                                        <ChevronRight className="h-4 w-4" />
-                                                    </Button>
+                                                    ))}
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="space-y-3">
-                                            <a
-                                                href={selectedMaterial.crawled_urls[currentCrawlPage].url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
-                                            >
-                                                {formatUrl(selectedMaterial.crawled_urls[currentCrawlPage].url)}
-                                                <ExternalLink className="h-3 w-3 shrink-0" />
-                                            </a>
-                                            <div className="markdown">
-                                                <ReactMarkdown
-                                                    remarkPlugins={[remarkGfm]}
-                                                    className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-semibold prose-p:text-sm prose-li:text-sm prose-code:text-sm prose-pre:bg-muted prose-pre:p-4 prose-a:text-primary hover:prose-a:underline"
-                                                    components={{
-                                                        img: () => null,
-                                                    }}
-                                                >
-                                                    {selectedMaterial.crawled_urls[currentCrawlPage].markdown_summary}
-                                                </ReactMarkdown>
+                                    ) : (
+                                        <>
+                                            {/* Content Rules - only show for non-semrush materials */}
+                                            <div className="border bg-muted/50 p-4">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
+                                                        Content Rules
+                                                    </span>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {selectedMaterial.content_rules.length === 0 ? (
+                                                        <div className="p-4 bg-muted/50 border">
+                                                            <p className="text-sm text-muted-foreground">
+                                                                No content rules defined
+                                                            </p>
+                                                        </div>
+                                                    ) : (
+                                                        selectedMaterial.content_rules.map((rule, index) => (
+                                                            <div key={index} className="p-4 bg-muted/50 border">
+                                                                <div className="space-y-3">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <h4 className="text-sm font-medium">{rule.name}</h4>
+                                                                        <span className="px-2 py-1 bg-[#4EBE96]/20 text-xs">
+                                                                            {rule.type}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="text-sm text-muted-foreground">
+                                                                            {rule.description}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-xs font-medium">Value</span>
+                                                                        {Array.isArray(rule.value) ? (
+                                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                                {rule.value.map((item, i) => (
+                                                                                    <span
+                                                                                        key={i}
+                                                                                        className="px-2 py-0.5 bg-muted text-xs"
+                                                                                    >
+                                                                                        {item}
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="mt-1 text-sm">
+                                                                                {typeof rule.value === "object" ? (
+                                                                                    <pre className="p-2 bg-muted font-mono text-xs overflow-x-auto">
+                                                                                        {JSON.stringify(rule.value, null, 2)}
+                                                                                    </pre>
+                                                                                ) : (
+                                                                                    <span className="px-2 py-0.5 bg-muted text-xs">
+                                                                                        {String(rule.value)}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    </div>
+
+                                            {/* Analysis */}
+                                            <div className="border bg-muted/50 p-4">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
+                                                        Analysis
+                                                    </span>
+                                                </div>
+                                                <div className="markdown">
+                                                    <ReactMarkdown
+                                                        remarkPlugins={[remarkGfm]}
+                                                        className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-semibold prose-p:text-sm prose-li:text-sm prose-code:text-sm prose-pre:bg-muted prose-pre:p-4 prose-a:text-primary hover:prose-a:underline"
+                                                        components={{
+                                                            img: () => null,
+                                                        }}
+                                                    >
+                                                        {selectedMaterial.analysis}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            </div>
+
+                                            {/* Crawled URLs */}
+                                            <div className="border bg-muted/50 p-4">
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <span className="relative text-sm font-medium px-1 bg-muted/50 border-[0.5px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] rounded-none">
+                                                        Crawled Pages</span>
+                                                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                                        <span>
+                                                            {currentCrawlPage + 1} of {selectedMaterial.crawled_urls.length}
+                                                        </span>
+                                                        <div className="flex items-center gap-1 ml-2">
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 rounded-none"
+                                                                disabled={currentCrawlPage === 0}
+                                                                onClick={() => setCurrentCrawlPage((prev) => prev - 1)}
+                                                            >
+                                                                <ChevronLeft className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 rounded-none"
+                                                                disabled={currentCrawlPage === selectedMaterial.crawled_urls.length - 1}
+                                                                onClick={() => setCurrentCrawlPage((prev) => prev + 1)}
+                                                            >
+                                                                <ChevronRight className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    <a
+                                                        href={selectedMaterial.crawled_urls[currentCrawlPage].url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
+                                                    >
+                                                        {formatUrl(selectedMaterial.crawled_urls[currentCrawlPage].url)}
+                                                        <ExternalLink className="h-3 w-3 shrink-0" />
+                                                    </a>
+                                                    <div className="markdown">
+                                                        <ReactMarkdown
+                                                            remarkPlugins={[remarkGfm]}
+                                                            className="prose dark:prose-invert prose-sm w-full max-w-none prose-headings:font-semibold prose-p:text-sm prose-li:text-sm prose-code:text-sm prose-pre:bg-muted prose-pre:p-4 prose-a:text-primary hover:prose-a:underline"
+                                                            components={{
+                                                                img: () => null,
+                                                            }}
+                                                        >
+                                                            {selectedMaterial.crawled_urls[currentCrawlPage].markdown_summary}
+                                                        </ReactMarkdown>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             ) : isLoading ? (
                                 <div className="h-full overflow-y-auto no-scrollbar p-6 space-y-6">

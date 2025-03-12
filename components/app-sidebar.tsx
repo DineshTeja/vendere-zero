@@ -51,11 +51,11 @@ const getNavData = () => ({
     },
   ],
   navMain: [
-    {
-      title: "Market",
-      url: "/market",
-      icon: BarChart3Icon,
-    },
+    // {
+    //   title: "Market",
+    //   url: "/market",
+    //   icon: BarChart3Icon,
+    // },
     {
       title: "Library & Data",
       url: "/library",

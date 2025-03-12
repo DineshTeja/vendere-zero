@@ -148,19 +148,63 @@ export default function Library() {
     // Set client-side rendering flag after component mounts
     useEffect(() => {
         setIsClientReady(true);
-        // Defer data fetching to not block initial render
-        const timer = setTimeout(() => {
-            fetchLibraryData(page);
-        }, 0);
-
-        return () => clearTimeout(timer);
+        // Check auth status before fetching data
+        checkAuthStatus();
     }, []);
+
+    const checkAuthStatus = async () => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (!session) {
+                // Redirect to login page instead of showing error
+                router.push('/auth/login');
+                return;
+            }
+
+            // Session exists, proceed to fetch data
+            fetchLibraryData(page);
+        } catch (error) {
+            console.error("Error checking auth status:", error);
+            // Redirect to login page on error
+            router.push('/auth/login');
+        }
+    };
 
     const fetchLibraryData = async (pageToLoad: number) => {
         try {
             setIsLoading(true);
-            const response = await fetch(`/api/library?page=${pageToLoad}&pageSize=${pageSize}`);
-            if (!response.ok) throw new Error("Failed to fetch library data");
+
+            // Check if user is authenticated first
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (!session) {
+                console.error("No active session found. User may not be authenticated.");
+                // Redirect to login page
+                router.push('/auth/login');
+                return;
+            }
+
+            // Include authorization header with session token
+            const response = await fetch(`/api/library?page=${pageToLoad}&pageSize=${pageSize}`, {
+                headers: {
+                    'Authorization': `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include'  // Include cookies
+            });
+
+            if (response.status === 401) {
+                console.error("Unauthorized: Authentication required");
+                // Redirect to login page on 401
+                router.push('/auth/login');
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch library data: ${response.status} ${response.statusText}`);
+            }
+
             const data: PaginatedResponse = await response.json();
 
             setCachedRecords(prev => ({
@@ -176,6 +220,14 @@ export default function Library() {
             setIsDataInitialized(true);
         } catch (error) {
             console.error("Error fetching library data:", error);
+            // Don't set authError anymore, just redirect to login if it's an auth issue
+            if (error instanceof Error && (
+                error.message.includes('401') ||
+                error.message.includes('auth') ||
+                error.message.includes('unauthorized')
+            )) {
+                router.push('/auth/login');
+            }
         } finally {
             setIsLoading(false);
         }
@@ -593,8 +645,32 @@ export default function Library() {
         if (loadedPages.has(pageToLoad)) return;
 
         try {
-            const response = await fetch(`/api/library?page=${pageToLoad}&pageSize=${pageSize}`);
-            if (!response.ok) throw new Error("Failed to fetch library data");
+            // Get the current session
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (!session) {
+                console.error("No active session found when loading page.");
+                router.push('/auth/login');
+                return;
+            }
+
+            const response = await fetch(`/api/library?page=${pageToLoad}&pageSize=${pageSize}`, {
+                headers: {
+                    'Authorization': `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include'
+            });
+
+            if (response.status === 401) {
+                router.push('/auth/login');
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch page data: ${response.status}`);
+            }
+
             const data: PaginatedResponse = await response.json();
 
             setCachedRecords(prev => ({
@@ -603,7 +679,15 @@ export default function Library() {
             }));
             setLoadedPages(prev => new Set(prev).add(pageToLoad));
         } catch (error) {
-            console.error("Error fetching library data:", error);
+            console.error("Error loading page data:", error);
+            // Redirect to login if it seems like an auth issue
+            if (error instanceof Error && (
+                error.message.includes('401') ||
+                error.message.includes('auth') ||
+                error.message.includes('unauthorized')
+            )) {
+                router.push('/auth/login');
+            }
         }
     };
 
@@ -685,7 +769,7 @@ export default function Library() {
                                         animate={{ opacity: activeTab === "materials" ? 1 : 0.8 }}
                                         transition={{ duration: 0.2 }}
                                     >
-                                        Materials
+                                        Company Data
                                     </motion.span>
                                 </TabsTrigger>
                             </TabsList>

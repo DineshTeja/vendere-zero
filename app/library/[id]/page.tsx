@@ -87,6 +87,25 @@ type VisualAttribute = Database['public']['Tables']['visual_attributes']['Row'];
 type FeatureWithVisualAttributes = Feature & { visual_attributes: VisualAttribute[] };
 type SentimentAnalysis = Database['public']['Tables']['sentiment_analysis']['Row'];
 
+// Add type for enhanced metrics
+type EnhancedMetrics = {
+    ad_id: string;
+    campaign_id: string | null;
+    channel: string;
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    cpc: number;
+    cpm: number;
+    conversion_rate: number;
+    conversions: number;
+    cost: number;
+    roas: number;
+    date: string;
+    viewability_rate: number;
+    viewable_impressions: number;
+};
+
 const LoadingSkeleton = () => (
     <div className="min-h-screen bg-background">
         <div className="px-4 py-4">
@@ -180,6 +199,7 @@ export default function AdDetail({
     const [record, setRecord] = useState<AdRecord | null>(null);
     const [loading, setLoading] = useState(true);
     const [expanded, setExpanded] = useState(false);
+    const [metrics, setMetrics] = useState<EnhancedMetrics[]>([]);
 
     useEffect(() => {
         fetchRecord();
@@ -199,7 +219,8 @@ export default function AdDetail({
             { data: adOutput, error: adError },
             { data: features },
             { data: sentiment },
-            { data: marketResearch }
+            { data: marketResearch },
+            { data: enhancedMetrics }
         ] = await Promise.all([
             // Ad output
             supabase
@@ -233,7 +254,14 @@ export default function AdDetail({
                 .from('market_research_v2')
                 .select('*')
                 .eq('image_url', searchParams.image_url)
-                .single<Database['public']['Tables']['market_research_v2']['Row']>()
+                .single<Database['public']['Tables']['market_research_v2']['Row']>(),
+
+            // Enhanced Metrics
+            supabase
+                .from('enhanced_ad_metrics')
+                .select('*')
+                .eq('ad_id', params.id)
+                .order('date', { ascending: false })
         ]);
 
         if (adError || !adOutput) {
@@ -242,13 +270,18 @@ export default function AdDetail({
             return;
         }
 
+        // Set enhanced metrics if available
+        if (enhancedMetrics) {
+            setMetrics(enhancedMetrics as EnhancedMetrics[]);
+        }
+
         const record = {
             id: adOutput.id,
             name: adOutput.name ?? (
                 features?.[0]?.keyword && sentiment?.tone
                     ? `Untitled ('${features[0].keyword}' + '${sentiment.tone}')`
                     : "Untitled"
-            ),            
+            ),
             image_url: adOutput.image_url,
             image_description: adOutput.image_description,
             created_at: new Date().toISOString(),
@@ -265,6 +298,26 @@ export default function AdDetail({
 
         setRecord(record as AdRecord);
         setLoading(false);
+    };
+
+    // Helper function to format numbers
+    const formatNumber = (num: number): string => {
+        if (num >= 1000000) {
+            return (num / 1000000).toFixed(1) + 'M';
+        } else if (num >= 1000) {
+            return (num / 1000).toFixed(1) + 'K';
+        }
+        return num.toString();
+    };
+
+    // Helper function to format currency
+    const formatCurrency = (amount: number): string => {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(amount);
     };
 
     if (loading) {
@@ -411,6 +464,66 @@ export default function AdDetail({
 
                         {/* Right Column */}
                         <div className="space-y-4">
+                            {/* Enhanced Metrics Section - Moved here and made more condensed */}
+                            {metrics.length > 0 && (
+                                <div className="bg-card border">
+                                    <div className="px-4 py-2 border-b bg-muted/50 flex items-center justify-between">
+                                        <h2 className="font-medium">Performance Metrics</h2>
+                                        <span className="text-xs text-white bg-green-500/20 px-2 py-0.5 rounded-md">Demo Purposes Only</span>
+                                    </div>
+                                    <div className="p-3">
+                                        <div className="flex justify-between text-xs text-muted-foreground mb-2">
+                                            <span>Campaign: <span className="font-medium text-foreground">{metrics[0].campaign_id || 'None'}</span></span>
+                                            <span>Channel: <span className="font-medium text-foreground capitalize">{metrics[0].channel}</span></span>
+                                        </div>
+
+                                        <div className="grid grid-cols-4 gap-2">
+                                            {/* Main metrics in a compact grid */}
+                                            <div className="bg-muted/30 p-2 rounded-md border text-center">
+                                                <div className="text-xs text-muted-foreground">Impressions</div>
+                                                <div className="text-sm font-medium">{formatNumber(metrics[0].impressions)}</div>
+                                            </div>
+                                            <div className="bg-muted/30 p-2 rounded-md border text-center">
+                                                <div className="text-xs text-muted-foreground">Clicks</div>
+                                                <div className="text-sm font-medium">{formatNumber(metrics[0].clicks)}</div>
+                                            </div>
+                                            <div className="bg-muted/30 p-2 rounded-md border text-center">
+                                                <div className="text-xs text-muted-foreground">Conv.</div>
+                                                <div className="text-sm font-medium">{metrics[0].conversions}</div>
+                                            </div>
+                                            <div className="bg-muted/30 p-2 rounded-md border text-center">
+                                                <div className="text-xs text-muted-foreground">Cost</div>
+                                                <div className="text-sm font-medium">{formatCurrency(metrics[0].cost)}</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-4 gap-2 mt-2">
+                                            {/* Secondary metrics */}
+                                            <div className="flex flex-col p-2 text-center">
+                                                <span className="text-xs text-muted-foreground">CTR</span>
+                                                <span className="text-xs font-medium">{(metrics[0].ctr * 100).toFixed(2)}%</span>
+                                            </div>
+                                            <div className="flex flex-col p-2 text-center">
+                                                <span className="text-xs text-muted-foreground">CPC</span>
+                                                <span className="text-xs font-medium">{formatCurrency(metrics[0].cpc)}</span>
+                                            </div>
+                                            <div className="flex flex-col p-2 text-center">
+                                                <span className="text-xs text-muted-foreground">Conv. Rate</span>
+                                                <span className="text-xs font-medium">{(metrics[0].conversion_rate * 100).toFixed(2)}%</span>
+                                            </div>
+                                            <div className="flex flex-col p-2 text-center">
+                                                <span className="text-xs text-muted-foreground">ROAS</span>
+                                                <span className="text-xs font-medium">{metrics[0].roas.toFixed(2)}x</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-2 flex justify-end">
+                                            <span className="text-xs text-muted-foreground">Updated: {new Date(metrics[0].date).toLocaleDateString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {record.market_research ? (
                                 <>
                                     {/* Existing Market Research Content */}
@@ -530,7 +643,7 @@ export default function AdDetail({
 
                                                     {/* Key Features */}
                                                     <div className="border bg-card p-4">
-                                                        <h4 className="text-sm font-medium mb-3">Key Features</h4>
+                                                        <h4 className="text-sm font-medium mb-3">Product Priorities</h4>
                                                         <div className="grid grid-cols-2 gap-4">
                                                             {record.market_research?.key_features.map((feature, i) => (
                                                                 <div key={i} className="border bg-muted/50 p-3">
@@ -595,23 +708,23 @@ export default function AdDetail({
                                                                             className="border bg-muted/50 p-4 space-y-4"
                                                                         >
                                                                             {/* Original vs Improved */}
-                                                                            <div className="grid grid-cols-2 gap-4">
+                                                                            <div className="grid grid-cols-1 gap-4">
                                                                                 <div className="space-y-2">
                                                                                     <span className="text-xs font-medium text-muted-foreground">Original</span>
                                                                                     <p className="text-sm font-medium bg-muted/30 p-2 border">
                                                                                         {headline.original}
                                                                                     </p>
                                                                                 </div>
-                                                                                <div className="space-y-2">
+                                                                                {/* <div className="space-y-2">
                                                                                     <span className="text-xs font-medium text-muted-foreground">Improved</span>
                                                                                     <p className="text-sm font-medium bg-primary/5 p-2 border border-primary/20">
                                                                                         {headline.improved}
                                                                                     </p>
-                                                                                </div>
+                                                                                </div> */}
                                                                             </div>
 
                                                                             {/* Improvements */}
-                                                                            <div className="space-y-2">
+                                                                            {/* <div className="space-y-2">
                                                                                 <span className="text-xs font-medium text-muted-foreground">Improvements</span>
                                                                                 <div className="space-y-1">
                                                                                     {headline.improvements.map((improvement, j) => (
@@ -621,10 +734,10 @@ export default function AdDetail({
                                                                                         </div>
                                                                                     ))}
                                                                                 </div>
-                                                                            </div>
+                                                                            </div> */}
 
                                                                             {/* Expected Impact */}
-                                                                            <div className="space-y-2">
+                                                                            {/* <div className="space-y-2">
                                                                                 <span className="text-xs font-medium text-muted-foreground">Expected Impact</span>
                                                                                 <div className="space-y-1">
                                                                                     {headline.expected_impact.map((impact, j) => (
@@ -634,7 +747,7 @@ export default function AdDetail({
                                                                                         </div>
                                                                                     ))}
                                                                                 </div>
-                                                                            </div>
+                                                                            </div> */}
 
                                                                             {/* Target Audience & Pain Points */}
                                                                             <div className="grid grid-cols-2 gap-4">

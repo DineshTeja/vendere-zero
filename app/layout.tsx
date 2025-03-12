@@ -6,7 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 // import { GeistSans } from "geist/font/sans";
 import { Header } from "@/components/header";
 import { Providers } from "@/components/providers";
-import { ConditionalSearch } from "@/components/conditional-search";
+// import { ConditionalSearch } from "@/components/conditional-search";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { Toaster } from "@/components/ui/sonner";
@@ -71,7 +71,7 @@ export default async function RootLayout({
             </SidebarProvider>
           </AuthProvider>
         </Providers>
-        <ConditionalSearch session={!!session} />
+        {/* <ConditionalSearch session={!!session} /> */}
       </body>
     </html>
   );
